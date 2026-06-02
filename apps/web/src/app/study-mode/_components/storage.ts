@@ -11,15 +11,16 @@ export const SHORT_BREAK_SECONDS = 5 * 60;
 export const LONG_BREAK_SECONDS = 15 * 60;
 
 export const emptyTaskForm = {
+  categoryId: "",
   title: "",
   description: "",
   priority: "medium" as TaskPriority,
-  estimatedPomodoros: 2,
+  estimatedMinutes: "",
 };
 
 export const emptyIdeaForm = {
   title: "",
-  note: "",
+  content: "",
   tag: "",
 };
 
@@ -29,33 +30,36 @@ export const initialTasks: StudyTask[] = [
     title: "Outline biology chapter notes",
     description: "Create a concise structure before reading details.",
     priority: "high",
-    estimatedPomodoros: 2,
-    completedPomodoros: 1,
-    status: "active",
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    estimatedMinutes: 50,
+    focusedMinutes: 25,
+    restMinutes: 0,
+    status: "todo",
+    createdAt: new Date(),
+    updatedAt: new Date(),
   },
   {
     id: "task-seed-2",
     title: "Solve practice questions",
     description: "Focus on the five hardest questions from the last set.",
     priority: "medium",
-    estimatedPomodoros: 3,
-    completedPomodoros: 0,
+    estimatedMinutes: 75,
+    focusedMinutes: 0,
+    restMinutes: 0,
     status: "todo",
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt: new Date(),
+    updatedAt: new Date(),
   },
   {
     id: "task-seed-3",
     title: "Review flashcard misses",
     description: "Turn recurring mistakes into one-line rules.",
     priority: "low",
-    estimatedPomodoros: 1,
-    completedPomodoros: 1,
+    estimatedMinutes: 25,
+    focusedMinutes: 25,
+    restMinutes: 5,
     status: "done",
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt: new Date(),
+    updatedAt: new Date(),
   },
 ];
 

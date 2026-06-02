@@ -2,17 +2,38 @@
 
 import { Plus } from "lucide-react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
-import type { TaskFormState, TaskPriority } from "./types";
+import { CustomSelect } from "./CustomSelect";
+import type { StudyCategory, TaskFormState, TaskPriority } from "./types";
+
+const estimatePresets = [15, 25, 45, 60, 90];
 
 export function CreateTaskForm({
   taskForm,
   setTaskForm,
+  categories,
+  onManageCategories,
   onSubmit,
 }: {
   taskForm: TaskFormState;
   setTaskForm: Dispatch<SetStateAction<TaskFormState>>;
+  categories: StudyCategory[];
+  onManageCategories: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const priorityOptions = [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+  ];
+  const categoryOptions = [
+    { value: "", label: "None" },
+    ...categories.map((category) => ({
+      value: category.id,
+      label: category.name,
+      color: category.color,
+    })),
+  ];
+
   return (
     <form
       onSubmit={onSubmit}
@@ -23,7 +44,7 @@ export function CreateTaskForm({
         <p className="text-sm text-[#92a4c9]">Define a clear output before starting the timer.</p>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_10rem_8rem]">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_10rem_10rem_8rem]">
         <div className="space-y-2">
           <label htmlFor="task-title-input" className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
             Task title
@@ -42,41 +63,81 @@ export function CreateTaskForm({
           <label htmlFor="task-priority-input" className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
             Priority
           </label>
-          <select
-            id="task-priority-input"
+          <CustomSelect
             value={taskForm.priority}
-            onChange={(event) =>
+            options={priorityOptions}
+            onChange={(value) =>
               setTaskForm((current) => ({
                 ...current,
-                priority: event.target.value as TaskPriority,
+                priority: value as TaskPriority,
               }))
             }
-            className="h-10 w-full rounded-xl border border-[#232f48] bg-[#111722] px-3 text-sm text-white outline-none transition focus:border-blue-500/60"
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
+          />
+        </div>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
+              Category
+            </label>
+            <button
+              type="button"
+              onClick={onManageCategories}
+              className="text-xs font-semibold text-blue-300 transition hover:text-blue-200"
+            >
+              Manage
+            </button>
+          </div>
+          <CustomSelect
+            value={taskForm.categoryId}
+            options={categoryOptions}
+            onChange={(value) =>
+              setTaskForm((current) => ({
+                ...current,
+                categoryId: value,
+              }))
+            }
+          />
         </div>
         <div className="space-y-2">
           <label htmlFor="task-estimate-input" className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
-            Pomos
+            Minutes
           </label>
           <input
             id="task-estimate-input"
             type="number"
-            min={1}
-            max={12}
-            value={taskForm.estimatedPomodoros}
+            min={0}
+            value={taskForm.estimatedMinutes}
             onChange={(event) =>
               setTaskForm((current) => ({
                 ...current,
-                estimatedPomodoros: Number(event.target.value),
+                estimatedMinutes: event.target.value,
               }))
             }
             className="h-10 w-full rounded-xl border border-[#232f48] bg-[#111722] px-3 text-sm text-white outline-none transition focus:border-blue-500/60"
           />
         </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {estimatePresets.map((minutes) => (
+          <button
+            key={minutes}
+            type="button"
+            onClick={() =>
+              setTaskForm((current) => ({ ...current, estimatedMinutes: String(minutes) }))
+            }
+            className="rounded-lg border border-[#232f48] bg-[#111722] px-2.5 py-1.5 text-xs font-semibold text-[#92a4c9] transition hover:text-white"
+          >
+            {minutes}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setTaskForm((current) => ({ ...current, estimatedMinutes: "" }))}
+          className="rounded-lg border border-[#232f48] bg-[#111722] px-2.5 py-1.5 text-xs font-semibold text-[#92a4c9] transition hover:text-white"
+        >
+          Custom
+        </button>
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_9rem]">

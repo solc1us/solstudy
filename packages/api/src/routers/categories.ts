@@ -15,13 +15,44 @@ const categoryInput = z.object({
   orderIndex: z.number().int().optional(),
 });
 
+const defaultCategories = [
+  { name: "Study", color: "#3b82f6" },
+  { name: "Coding", color: "#22c55e" },
+  { name: "Personal", color: "#f59e0b" },
+  { name: "Research", color: "#a855f7" },
+] as const;
+
 export const categoryRouter = router({
-  list: protectedProcedure.query(({ ctx }) => {
-    return db
-      .select()
-      .from(categories)
-      .where(eq(categories.userId, ctx.session.user.id))
-      .orderBy(asc(categories.orderIndex), asc(categories.createdAt));
+  list: protectedProcedure.query(async ({ ctx }) => {
+    const userId = ctx.session.user.id;
+
+    return db.transaction(async (tx) => {
+      const existingCategories = await tx
+        .select()
+        .from(categories)
+        .where(eq(categories.userId, userId))
+        .orderBy(asc(categories.orderIndex), asc(categories.createdAt));
+
+      if (existingCategories.length) {
+        return existingCategories;
+      }
+
+      await tx.insert(categories).values(
+        defaultCategories.map((category, index) => ({
+          id: crypto.randomUUID(),
+          userId,
+          name: category.name,
+          color: category.color,
+          orderIndex: index,
+        })),
+      );
+
+      return tx
+        .select()
+        .from(categories)
+        .where(eq(categories.userId, userId))
+        .orderBy(asc(categories.orderIndex), asc(categories.createdAt));
+    });
   }),
 
   create: protectedProcedure.input(categoryInput).mutation(({ ctx, input }) => {

@@ -3,16 +3,27 @@ export type TaskStatus = "todo" | "active" | "done";
 export type PomodoroMode = "focus" | "short-break" | "long-break";
 export type StudyRoute = "today" | "upcoming" | "completed" | "ai-chat" | "mind-map" | "review-cards";
 
+export interface StudyCategory {
+  id: string;
+  name: string;
+  color?: string | null;
+  orderIndex: number;
+}
+
 export interface StudyTask {
   id: string;
+  categoryId?: string | null;
   title: string;
-  description?: string;
+  description?: string | null;
   priority: TaskPriority;
-  estimatedPomodoros: number;
-  completedPomodoros: number;
+  estimatedMinutes?: number | null;
+  focusedMinutes: number;
+  restMinutes: number;
   status: TaskStatus;
-  createdAt: number;
-  updatedAt: number;
+  startedAt?: Date | string | null;
+  completedAt?: Date | string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
 }
 
 export interface PomodoroState {
@@ -26,9 +37,11 @@ export interface PomodoroState {
 export interface IdeaVaultItem {
   id: string;
   title: string;
-  note: string;
-  tag?: string;
-  createdAt: number;
+  content?: string | null;
+  tag?: string | null;
+  convertedTaskId?: string | null;
+  createdAt: Date | string;
+  updatedAt?: Date | string;
 }
 
 export interface ProductivityStats {
@@ -38,15 +51,16 @@ export interface ProductivityStats {
 }
 
 export type TaskFormState = {
+  categoryId: string;
   title: string;
   description: string;
   priority: TaskPriority;
-  estimatedPomodoros: number;
+  estimatedMinutes: string;
 };
 
 export type IdeaFormState = {
   title: string;
-  note: string;
+  content: string;
   tag: string;
 };
 

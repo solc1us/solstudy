@@ -1,27 +1,31 @@
 "use client";
 
 import { TaskCard } from "./TaskCard";
-import type { StudyTask } from "./types";
+import type { StudyCategory, StudyTask } from "./types";
 
 export function TaskList({
   title,
   subtitle,
   tasks,
+  categories,
   selectedTaskId,
   onSelectTask,
   onEditTask,
   onDeleteTask,
   onMarkDone,
+  onRestoreTask,
   emptyText = "No active tasks yet.",
 }: {
   title: string;
   subtitle: string;
   tasks: StudyTask[];
+  categories: StudyCategory[];
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
   onEditTask: (task: StudyTask) => void;
   onDeleteTask: (task: StudyTask) => void;
   onMarkDone: (taskId: string) => void;
+  onRestoreTask: (taskId: string) => void;
   emptyText?: string;
 }) {
   return (
@@ -36,11 +40,13 @@ export function TaskList({
             <TaskCard
               key={task.id}
               task={task}
+              category={categories.find((category) => category.id === task.categoryId)}
               isSelected={task.id === selectedTaskId}
               onSelect={() => onSelectTask(task.id)}
               onEdit={() => onEditTask(task)}
               onDelete={() => onDeleteTask(task)}
               onMarkDone={() => onMarkDone(task.id)}
+              onRestore={() => onRestoreTask(task.id)}
             />
           ))
         ) : (

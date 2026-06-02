@@ -16,6 +16,16 @@ const ideaInput = z.object({
   convertedTaskId: z.string().min(1).nullable().optional(),
 });
 
+async function getUserTaskId(taskId: string, userId: string) {
+  const [task] = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)))
+    .limit(1);
+
+  return task?.id;
+}
+
 export const ideaRouter = router({
   list: protectedProcedure.query(({ ctx }) => {
     return db
@@ -25,7 +35,11 @@ export const ideaRouter = router({
       .orderBy(desc(ideas.createdAt));
   }),
 
-  create: protectedProcedure.input(ideaInput).mutation(({ ctx, input }) => {
+  create: protectedProcedure.input(ideaInput).mutation(async ({ ctx, input }) => {
+    const convertedTaskId = input.convertedTaskId
+      ? await getUserTaskId(input.convertedTaskId, ctx.session.user.id)
+      : null;
+
     return db
       .insert(ideas)
       .values({
@@ -34,7 +48,7 @@ export const ideaRouter = router({
         title: input.title,
         content: input.content ?? null,
         tag: input.tag ?? null,
-        convertedTaskId: input.convertedTaskId ?? null,
+        convertedTaskId,
       })
       .returning()
       .then(([idea]) => idea);
@@ -50,13 +64,17 @@ export const ideaRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const convertedTaskId = input.convertedTaskId
+        ? await getUserTaskId(input.convertedTaskId, ctx.session.user.id)
+        : input.convertedTaskId;
+
       const [idea] = await db
         .update(ideas)
         .set({
           title: input.title,
           content: input.content,
           tag: input.tag,
-          convertedTaskId: input.convertedTaskId,
+          convertedTaskId,
         })
         .where(and(eq(ideas.id, input.id), eq(ideas.userId, ctx.session.user.id)))
         .returning();

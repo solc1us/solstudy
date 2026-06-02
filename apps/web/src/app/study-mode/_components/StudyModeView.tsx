@@ -1,15 +1,18 @@
 "use client";
 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
   CalendarClock,
-  CheckCircle2,
   ListChecks,
   Menu,
   Sparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { toast } from "sonner";
+import { trpc } from "@/utils/trpc";
+import { CategoryManagementModal } from "./CategoryManagementModal";
 import { ConfirmModal } from "./ConfirmModal";
 import { CreateTaskForm } from "./CreateTaskForm";
 import { EditTaskModal } from "./EditTaskModal";
@@ -19,16 +22,11 @@ import { StudySidebar } from "./StudySidebar";
 import { TaskList } from "./TaskList";
 import {
   FOCUS_SECONDS,
-  IDEAS_KEY,
   POMODORO_KEY,
   SELECTED_TASK_KEY,
-  STATS_KEY,
-  TASKS_KEY,
-  createId,
   emptyIdeaForm,
   emptyTaskForm,
   getDurationForMode,
-  initialTasks,
   readLocalStorage,
 } from "./storage";
 import type {
@@ -37,6 +35,7 @@ import type {
   PomodoroMode,
   PomodoroState,
   ProductivityStats,
+  StudyCategory,
   StudyRoute,
   StudyTask,
   TaskFormState,
@@ -99,37 +98,174 @@ const soonPages: Record<
   },
 };
 
+type FocusSessionMode = "focus" | "short_break" | "long_break";
+
+function toTime(value: Date | string | null | undefined) {
+  return value ? new Date(value).getTime() : 0;
+}
+
+function parseEstimatedMinutes(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+
+  return Math.round(parsed);
+}
+
+function toFocusSessionMode(mode: PomodoroMode): FocusSessionMode {
+  if (mode === "short-break") return "short_break";
+  if (mode === "long-break") return "long_break";
+  return "focus";
+}
+
+function isAuthError(error: unknown) {
+  return error instanceof Error && error.message.toLowerCase().includes("authentication");
+}
+
 export default function StudyModeView({ view = "today" }: { view?: StudyRoute }) {
+  const queryClient = useQueryClient();
   const [hasLoaded, setHasLoaded] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [tasks, setTasks] = useState<StudyTask[]>(initialTasks);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialTasks[0]?.id ?? null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [pomodoro, setPomodoro] = useState<PomodoroState>({
     mode: "focus",
     remainingSeconds: FOCUS_SECONDS,
     isRunning: false,
-    selectedTaskId: initialTasks[0]?.id ?? null,
+    selectedTaskId: null,
     completedFocusSessions: 0,
-  });
-  const [stats, setStats] = useState<ProductivityStats>({
-    totalTasksToday: initialTasks.length,
-    completedTasks: initialTasks.filter((task) => task.status === "done").length,
-    totalFocusSessions: 0,
   });
   const [taskForm, setTaskForm] = useState<TaskFormState>(emptyTaskForm);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editTaskForm, setEditTaskForm] = useState<TaskFormState>(emptyTaskForm);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState>(null);
   const [isIdeaVaultOpen, setIsIdeaVaultOpen] = useState(false);
-  const [ideas, setIdeas] = useState<IdeaVaultItem[]>([]);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [ideaForm, setIdeaForm] = useState(emptyIdeaForm);
+  const [editingIdeaId, setEditingIdeaId] = useState<string | null>(null);
+
+  const tasksQuery = useQuery(trpc.tasks.list.queryOptions(undefined, { retry: false }));
+  const categoriesQuery = useQuery(trpc.categories.list.queryOptions(undefined, { retry: false }));
+  const ideasQuery = useQuery(trpc.ideas.list.queryOptions(undefined, { retry: false }));
+
+  const invalidateTasks = useCallback(() => {
+    return queryClient.invalidateQueries(trpc.tasks.pathFilter());
+  }, [queryClient]);
+
+  const invalidateIdeas = useCallback(() => {
+    return queryClient.invalidateQueries(trpc.ideas.pathFilter());
+  }, [queryClient]);
+
+  const invalidateCategories = useCallback(() => {
+    return queryClient.invalidateQueries(trpc.categories.pathFilter());
+  }, [queryClient]);
+
+  const onMutationError = useCallback((error: { message: string }) => {
+    toast.error(error.message);
+  }, []);
+
+  const createTaskMutation = useMutation(
+    trpc.tasks.create.mutationOptions({
+      onError: onMutationError,
+      onSuccess: async (task) => {
+        await invalidateTasks();
+        if (task?.id) {
+          setSelectedTaskId(task.id);
+          setPomodoro((current) => ({ ...current, selectedTaskId: task.id }));
+        }
+      },
+    }),
+  );
+  const updateTaskMutation = useMutation(
+    trpc.tasks.update.mutationOptions({
+      onError: onMutationError,
+      onSuccess: invalidateTasks,
+    }),
+  );
+  const deleteTaskMutation = useMutation(
+    trpc.tasks.delete.mutationOptions({
+      onError: onMutationError,
+      onSuccess: invalidateTasks,
+    }),
+  );
+  const markDoneMutation = useMutation(
+    trpc.tasks.markDone.mutationOptions({
+      onError: onMutationError,
+      onSuccess: invalidateTasks,
+    }),
+  );
+  const restoreTaskMutation = useMutation(
+    trpc.tasks.restore.mutationOptions({
+      onError: onMutationError,
+      onSuccess: invalidateTasks,
+    }),
+  );
+  const setStartedMutation = useMutation(
+    trpc.tasks.setStarted.mutationOptions({
+      onError: onMutationError,
+      onSuccess: invalidateTasks,
+    }),
+  );
+  const createCategoryMutation = useMutation(
+    trpc.categories.create.mutationOptions({
+      onError: onMutationError,
+      onSuccess: invalidateCategories,
+    }),
+  );
+  const updateCategoryMutation = useMutation(
+    trpc.categories.update.mutationOptions({
+      onError: onMutationError,
+      onSuccess: invalidateCategories,
+    }),
+  );
+  const deleteCategoryMutation = useMutation(
+    trpc.categories.delete.mutationOptions({
+      onError: onMutationError,
+      onSuccess: async () => {
+        await Promise.all([invalidateCategories(), invalidateTasks()]);
+      },
+    }),
+  );
+  const completeFocusSessionMutation = useMutation(
+    trpc.focusSessions.complete.mutationOptions({
+      onError: onMutationError,
+      onSuccess: invalidateTasks,
+    }),
+  );
+  const createIdeaMutation = useMutation(
+    trpc.ideas.create.mutationOptions({
+      onError: onMutationError,
+      onSuccess: invalidateIdeas,
+    }),
+  );
+  const updateIdeaMutation = useMutation(
+    trpc.ideas.update.mutationOptions({
+      onError: onMutationError,
+      onSuccess: invalidateIdeas,
+    }),
+  );
+  const deleteIdeaMutation = useMutation(
+    trpc.ideas.delete.mutationOptions({
+      onError: onMutationError,
+      onSuccess: invalidateIdeas,
+    }),
+  );
+  const convertIdeaMutation = useMutation(
+    trpc.ideas.convertToTask.mutationOptions({
+      onError: onMutationError,
+      onSuccess: async (task) => {
+        await Promise.all([invalidateIdeas(), invalidateTasks()]);
+        if (task?.id) {
+          setSelectedTaskId(task.id);
+          setPomodoro((current) => ({ ...current, selectedTaskId: task.id }));
+        }
+      },
+    }),
+  );
 
   useEffect(() => {
-    const loadedTasks = readLocalStorage<StudyTask[]>(TASKS_KEY, initialTasks);
-    const loadedSelectedTaskId = readLocalStorage<string | null>(
-      SELECTED_TASK_KEY,
-      loadedTasks.find((task) => task.status !== "done")?.id ?? null,
-    );
+    const loadedSelectedTaskId = readLocalStorage<string | null>(SELECTED_TASK_KEY, null);
     const loadedPomodoro = readLocalStorage<PomodoroState>(POMODORO_KEY, {
       mode: "focus",
       remainingSeconds: FOCUS_SECONDS,
@@ -138,33 +274,15 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
       completedFocusSessions: 0,
     });
 
-    setTasks(loadedTasks);
+    // TODO: Add an explicit import flow for legacy solstudy-tasks/solstudy-ideas data.
     setSelectedTaskId(loadedSelectedTaskId);
     setPomodoro({
       ...loadedPomodoro,
       selectedTaskId: loadedSelectedTaskId,
       isRunning: false,
     });
-    setIdeas(readLocalStorage<IdeaVaultItem[]>(IDEAS_KEY, []));
-    setStats(
-      readLocalStorage<ProductivityStats>(STATS_KEY, {
-        totalTasksToday: loadedTasks.length,
-        completedTasks: loadedTasks.filter((task) => task.status === "done").length,
-        totalFocusSessions: loadedPomodoro.completedFocusSessions,
-      }),
-    );
     setHasLoaded(true);
   }, []);
-
-  useEffect(() => {
-    if (!hasLoaded) return;
-    window.localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
-    setStats((current) => ({
-      ...current,
-      totalTasksToday: tasks.length,
-      completedTasks: tasks.filter((task) => task.status === "done").length,
-    }));
-  }, [hasLoaded, tasks]);
 
   useEffect(() => {
     if (!hasLoaded) return;
@@ -176,36 +294,97 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     window.localStorage.setItem(POMODORO_KEY, JSON.stringify(pomodoro));
   }, [hasLoaded, pomodoro]);
 
-  useEffect(() => {
-    if (!hasLoaded) return;
-    window.localStorage.setItem(IDEAS_KEY, JSON.stringify(ideas));
-  }, [hasLoaded, ideas]);
-
-  useEffect(() => {
-    if (!hasLoaded) return;
-    window.localStorage.setItem(STATS_KEY, JSON.stringify(stats));
-  }, [hasLoaded, stats]);
+  const tasks = useMemo<StudyTask[]>(() => tasksQuery.data ?? [], [tasksQuery.data]);
+  const categories = useMemo<StudyCategory[]>(() => categoriesQuery.data ?? [], [categoriesQuery.data]);
+  const ideas = useMemo<IdeaVaultItem[]>(() => ideasQuery.data ?? [], [ideasQuery.data]);
 
   const activeTasks = useMemo(
-    () => tasks.filter((task) => task.status !== "done").sort((a, b) => b.updatedAt - a.updatedAt),
+    () =>
+      tasks
+        .filter((task) => task.status !== "done")
+        .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt)),
     [tasks],
   );
   const completedTasks = useMemo(
-    () => tasks.filter((task) => task.status === "done").sort((a, b) => b.updatedAt - a.updatedAt),
+    () =>
+      tasks
+        .filter((task) => task.status === "done")
+        .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt)),
     [tasks],
   );
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedTaskId) ?? null,
     [selectedTaskId, tasks],
   );
+  const stats = useMemo<ProductivityStats>(
+    () => ({
+      totalTasksToday: tasks.length,
+      completedTasks: completedTasks.length,
+      totalFocusSessions: pomodoro.completedFocusSessions,
+    }),
+    [completedTasks.length, pomodoro.completedFocusSessions, tasks.length],
+  );
   const timerProgress =
     1 - pomodoro.remainingSeconds / Math.max(getDurationForMode(pomodoro.mode), 1);
   const longBreakDue =
     pomodoro.completedFocusSessions > 0 && pomodoro.completedFocusSessions % 4 === 0;
+  const isLoadingData = tasksQuery.isPending || categoriesQuery.isPending || ideasQuery.isPending;
+  const hasAuthError =
+    isAuthError(tasksQuery.error) || isAuthError(categoriesQuery.error) || isAuthError(ideasQuery.error);
 
-  const finishCurrentSession = useCallback(() => {
+  useEffect(() => {
+    if (!hasLoaded || tasksQuery.isPending) return;
+
+    const selectedTaskIsAvailable =
+      selectedTaskId &&
+      tasks.some((task) => task.id === selectedTaskId && task.status !== "done");
+
+    if (selectedTaskIsAvailable) return;
+
+    const fallbackId = activeTasks[0]?.id ?? null;
+    setSelectedTaskId(fallbackId);
+    setPomodoro((current) => ({
+      ...current,
+      selectedTaskId: fallbackId,
+      isRunning: fallbackId ? current.isRunning : false,
+    }));
+  }, [activeTasks, hasLoaded, selectedTaskId, tasks, tasksQuery.isPending]);
+
+  const finishCurrentSession = useCallback(async () => {
+    if (completeFocusSessionMutation.isPending) return;
+
     const activeMode = pomodoro.mode;
     const taskId = selectedTaskId;
+    const durationSeconds = getDurationForMode(activeMode);
+
+    if (!taskId) {
+      setPomodoro((current) => ({
+        ...current,
+        isRunning: false,
+        remainingSeconds: durationSeconds,
+      }));
+      return;
+    }
+
+    const elapsedSeconds = Math.max(0, durationSeconds - pomodoro.remainingSeconds);
+    const plannedMinutes = Math.round(durationSeconds / 60);
+    const actualMinutes =
+      pomodoro.remainingSeconds <= 0
+        ? plannedMinutes
+        : Math.max(1, Math.round(elapsedSeconds / 60));
+
+    try {
+      await completeFocusSessionMutation.mutateAsync({
+        taskId,
+        mode: toFocusSessionMode(activeMode),
+        plannedMinutes,
+        actualMinutes,
+        startedAt: new Date(Date.now() - elapsedSeconds * 1000),
+        endedAt: new Date(),
+      });
+    } catch {
+      return;
+    }
 
     if (activeMode !== "focus") {
       setPomodoro((current) => ({
@@ -216,41 +395,6 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
       }));
       return;
     }
-
-    if (!taskId) {
-      setPomodoro((current) => ({
-        ...current,
-        isRunning: false,
-        remainingSeconds: FOCUS_SECONDS,
-      }));
-      return;
-    }
-
-    setTasks((currentTasks) =>
-      currentTasks.map((task) => {
-        if (task.id !== taskId) return task;
-        const nextCompletedPomodoros = Math.min(
-          task.completedPomodoros + 1,
-          Math.max(task.estimatedPomodoros, task.completedPomodoros + 1),
-        );
-        return {
-          ...task,
-          completedPomodoros: nextCompletedPomodoros,
-          status:
-            task.status === "done"
-              ? "done"
-              : nextCompletedPomodoros >= task.estimatedPomodoros
-                ? "done"
-                : "active",
-          updatedAt: Date.now(),
-        };
-      }),
-    );
-
-    setStats((current) => ({
-      ...current,
-      totalFocusSessions: current.totalFocusSessions + 1,
-    }));
 
     setPomodoro((current) => {
       const completedFocusSessions = current.completedFocusSessions + 1;
@@ -264,7 +408,12 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
         completedFocusSessions,
       };
     });
-  }, [pomodoro.mode, selectedTaskId]);
+  }, [
+    completeFocusSessionMutation,
+    pomodoro.mode,
+    pomodoro.remainingSeconds,
+    selectedTaskId,
+  ]);
 
   useEffect(() => {
     if (!pomodoro.isRunning) return;
@@ -273,7 +422,9 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
       setPomodoro((current) => {
         if (!current.isRunning) return current;
         if (current.remainingSeconds <= 1) {
-          window.setTimeout(finishCurrentSession, 0);
+          window.setTimeout(() => {
+            void finishCurrentSession();
+          }, 0);
           return {
             ...current,
             remainingSeconds: 0,
@@ -296,20 +447,6 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
       ...current,
       selectedTaskId: taskId,
     }));
-    setTasks((currentTasks) =>
-      currentTasks.map((task) => ({
-        ...task,
-        status:
-          task.id === taskId
-            ? task.status === "done"
-              ? "done"
-              : "active"
-            : task.status === "active"
-              ? "todo"
-              : task.status,
-        updatedAt: task.id === taskId ? Date.now() : task.updatedAt,
-      })),
-    );
   }, []);
 
   const resetTaskForm = () => {
@@ -321,24 +458,19 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     setEditTaskForm(emptyTaskForm);
   };
 
-  const handleTaskSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleTaskSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const title = taskForm.title.trim();
     if (!title) return;
 
-    const newTask: StudyTask = {
-      id: createId("task"),
+    await createTaskMutation.mutateAsync({
+      categoryId: taskForm.categoryId || null,
       title,
-      description: taskForm.description.trim(),
+      description: taskForm.description.trim() || null,
       priority: taskForm.priority,
-      estimatedPomodoros: Math.max(1, taskForm.estimatedPomodoros),
-      completedPomodoros: 0,
-      status: "todo",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    setTasks((currentTasks) => [newTask, ...currentTasks]);
-    selectTask(newTask.id);
+      estimatedMinutes: parseEstimatedMinutes(taskForm.estimatedMinutes),
+      orderIndex: 0,
+    });
     resetTaskForm();
   };
 
@@ -346,47 +478,39 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     if (task.status === "done") return;
     setEditingTaskId(task.id);
     setEditTaskForm({
+      categoryId: task.categoryId ?? "",
       title: task.title,
       description: task.description ?? "",
       priority: task.priority,
-      estimatedPomodoros: task.estimatedPomodoros,
+      estimatedMinutes: task.estimatedMinutes ? String(task.estimatedMinutes) : "",
     });
   };
 
-  const saveEditedTask = (event: FormEvent<HTMLFormElement>) => {
+  const saveEditedTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!editingTaskId) return;
 
     const title = editTaskForm.title.trim();
     if (!title) return;
 
-    setTasks((currentTasks) =>
-      currentTasks.map((task) =>
-        task.id === editingTaskId
-          ? {
-              ...task,
-              title,
-              description: editTaskForm.description.trim(),
-              priority: editTaskForm.priority,
-              estimatedPomodoros: Math.max(1, editTaskForm.estimatedPomodoros),
-              updatedAt: Date.now(),
-            }
-          : task,
-      ),
-    );
+    await updateTaskMutation.mutateAsync({
+      id: editingTaskId,
+      categoryId: editTaskForm.categoryId || null,
+      title,
+      description: editTaskForm.description.trim() || null,
+      priority: editTaskForm.priority,
+      estimatedMinutes: parseEstimatedMinutes(editTaskForm.estimatedMinutes),
+    });
     closeEditTaskModal();
   };
 
-  const deleteTask = (taskId: string) => {
-    const remainingTasks = tasks.filter((task) => task.id !== taskId);
-    setTasks(remainingTasks);
+  const deleteTask = async (taskId: string) => {
+    await deleteTaskMutation.mutateAsync({ id: taskId });
     if (selectedTaskId === taskId) {
-      const fallbackTask = remainingTasks.find((task) => task.status !== "done");
-      const fallbackId = fallbackTask?.id ?? null;
-      setSelectedTaskId(fallbackId);
+      setSelectedTaskId(null);
       setPomodoro((current) => ({
         ...current,
-        selectedTaskId: fallbackId,
+        selectedTaskId: null,
         isRunning: false,
       }));
     }
@@ -397,12 +521,18 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
       title: task.status === "done" ? "Delete completed task?" : "Delete task?",
       message: `"${task.title}" will be removed from this study plan.`,
       confirmLabel: "Delete Task",
-      onConfirm: () => deleteTask(task.id),
+      onConfirm: () => {
+        void deleteTask(task.id);
+      },
     });
   };
 
-  const deleteIdea = (ideaId: string) => {
-    setIdeas((currentIdeas) => currentIdeas.filter((item) => item.id !== ideaId));
+  const deleteIdea = async (ideaId: string) => {
+    await deleteIdeaMutation.mutateAsync({ id: ideaId });
+    if (editingIdeaId === ideaId) {
+      setEditingIdeaId(null);
+      setIdeaForm(emptyIdeaForm);
+    }
   };
 
   const requestDeleteIdea = (idea: IdeaVaultItem) => {
@@ -410,7 +540,46 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
       title: "Delete idea?",
       message: `"${idea.title}" will be removed from your Idea Vault.`,
       confirmLabel: "Delete Idea",
-      onConfirm: () => deleteIdea(idea.id),
+      onConfirm: () => {
+        void deleteIdea(idea.id);
+      },
+    });
+  };
+
+  const createCategory = async (input: { name: string; color: string }) => {
+    const name = input.name.trim();
+    if (!name) return;
+
+    await createCategoryMutation.mutateAsync({
+      name,
+      color: input.color.trim() || null,
+      orderIndex: categories.length,
+    });
+  };
+
+  const updateCategory = async (id: string, input: { name: string; color: string }) => {
+    const name = input.name.trim();
+    if (!name) return;
+
+    await updateCategoryMutation.mutateAsync({
+      id,
+      name,
+      color: input.color.trim() || null,
+    });
+  };
+
+  const deleteCategory = async (categoryId: string) => {
+    await deleteCategoryMutation.mutateAsync({ id: categoryId });
+  };
+
+  const requestDeleteCategory = (category: StudyCategory) => {
+    setDeleteConfirmation({
+      title: "Delete category?",
+      message: `"${category.name}" will be removed. Tasks in this category will become uncategorized.`,
+      confirmLabel: "Delete Category",
+      onConfirm: () => {
+        void deleteCategory(category.id);
+      },
     });
   };
 
@@ -420,19 +589,8 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     setDeleteConfirmation(null);
   };
 
-  const markTaskDone = (taskId: string) => {
-    setTasks((currentTasks) =>
-      currentTasks.map((task) =>
-        task.id === taskId
-          ? {
-              ...task,
-              status: "done",
-              completedPomodoros: Math.max(task.completedPomodoros, task.estimatedPomodoros),
-              updatedAt: Date.now(),
-            }
-          : task,
-      ),
-    );
+  const markTaskDone = async (taskId: string) => {
+    await markDoneMutation.mutateAsync({ id: taskId });
     setPomodoro((current) =>
       current.selectedTaskId === taskId
         ? {
@@ -443,9 +601,18 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     );
   };
 
+  const restoreTask = async (taskId: string) => {
+    await restoreTaskMutation.mutateAsync({ id: taskId });
+  };
+
   const startTimer = () => {
     if (!selectedTask) return;
     selectTask(selectedTask.id);
+
+    if (!selectedTask.startedAt) {
+      setStartedMutation.mutate({ id: selectedTask.id });
+    }
+
     setPomodoro((current) => ({
       ...current,
       remainingSeconds:
@@ -476,23 +643,47 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     }));
   };
 
-  const submitIdea = (event: FormEvent<HTMLFormElement>) => {
+  const submitIdea = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const title = ideaForm.title.trim();
-    const note = ideaForm.note.trim();
-    if (!title || !note) return;
+    if (!title) return;
 
-    setIdeas((currentIdeas) => [
-      {
-        id: createId("idea"),
+    if (editingIdeaId) {
+      await updateIdeaMutation.mutateAsync({
+        id: editingIdeaId,
         title,
-        note,
-        tag: ideaForm.tag.trim() || undefined,
-        createdAt: Date.now(),
-      },
-      ...currentIdeas,
-    ]);
+        content: ideaForm.content.trim() || null,
+        tag: ideaForm.tag.trim() || null,
+      });
+      setEditingIdeaId(null);
+    } else {
+      await createIdeaMutation.mutateAsync({
+        title,
+        content: ideaForm.content.trim() || null,
+        tag: ideaForm.tag.trim() || null,
+      });
+    }
+
     setIdeaForm(emptyIdeaForm);
+  };
+
+  const editIdea = (idea: IdeaVaultItem) => {
+    setEditingIdeaId(idea.id);
+    setIdeaForm({
+      title: idea.title,
+      content: idea.content ?? "",
+      tag: idea.tag ?? "",
+    });
+  };
+
+  const cancelEditIdea = () => {
+    setEditingIdeaId(null);
+    setIdeaForm(emptyIdeaForm);
+  };
+
+  const convertIdeaToTask = async (idea: IdeaVaultItem) => {
+    if (idea.convertedTaskId) return;
+    await convertIdeaMutation.mutateAsync({ id: idea.id });
   };
 
   const commonTaskListProps = {
@@ -500,10 +691,45 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     onSelectTask: selectTask,
     onEditTask: editTask,
     onDeleteTask: requestDeleteTask,
-    onMarkDone: markTaskDone,
+    onMarkDone: (taskId: string) => {
+      void markTaskDone(taskId);
+    },
+    onRestoreTask: (taskId: string) => {
+      void restoreTask(taskId);
+    },
+    categories,
+  };
+
+  const renderDataState = () => {
+    if (hasAuthError) {
+      return (
+        <PlaceholderCard
+          icon={Sparkles}
+          title="Sign in required"
+          body="Study Mode data is now synced to your account. Sign in to view and update tasks, focus sessions, and ideas."
+        />
+      );
+    }
+
+    if (isLoadingData) {
+      return (
+        <PlaceholderCard
+          icon={Sparkles}
+          title="Loading Study Mode"
+          body="Fetching your tasks, categories, and ideas."
+        />
+      );
+    }
+
+    return null;
   };
 
   const renderContent = () => {
+    const dataState = renderDataState();
+    if (dataState && (view === "today" || view === "upcoming" || view === "completed")) {
+      return dataState;
+    }
+
     if (view === "completed") {
       return (
         <div className="max-w-4xl">
@@ -548,6 +774,8 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
           <CreateTaskForm
             taskForm={taskForm}
             setTaskForm={setTaskForm}
+            categories={categories}
+            onManageCategories={() => setIsCategoryModalOpen(true)}
             onSubmit={handleTaskSubmit}
           />
           <TaskList
@@ -566,7 +794,7 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
         </section>
 
         <PomodoroPanel
-          selectedTask={selectedTask}
+          selectedTask={selectedTask?.status === "done" ? null : selectedTask}
           pomodoro={pomodoro}
           timerProgress={timerProgress}
           longBreakDue={longBreakDue}
@@ -574,7 +802,9 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
           onStart={startTimer}
           onPause={pauseTimer}
           onReset={resetTimer}
-          onFinish={finishCurrentSession}
+          onFinish={() => {
+            void finishCurrentSession();
+          }}
         />
       </div>
     );
@@ -630,17 +860,31 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
         ideas={ideas}
         ideaForm={ideaForm}
         setIdeaForm={setIdeaForm}
+        editingIdeaId={editingIdeaId}
         onOpen={() => setIsIdeaVaultOpen(true)}
         onClose={() => setIsIdeaVaultOpen(false)}
         onSubmit={submitIdea}
+        onCancelEdit={cancelEditIdea}
+        onEditIdea={editIdea}
         onRequestDeleteIdea={requestDeleteIdea}
+        onConvertIdea={convertIdeaToTask}
       />
       <EditTaskModal
         isOpen={Boolean(editingTaskId)}
         editTaskForm={editTaskForm}
         setEditTaskForm={setEditTaskForm}
+        categories={categories}
+        onManageCategories={() => setIsCategoryModalOpen(true)}
         onClose={closeEditTaskModal}
         onSubmit={saveEditedTask}
+      />
+      <CategoryManagementModal
+        isOpen={isCategoryModalOpen}
+        categories={categories}
+        onClose={() => setIsCategoryModalOpen(false)}
+        onCreateCategory={createCategory}
+        onUpdateCategory={updateCategory}
+        onRequestDeleteCategory={requestDeleteCategory}
       />
       <ConfirmModal
         confirmation={deleteConfirmation}

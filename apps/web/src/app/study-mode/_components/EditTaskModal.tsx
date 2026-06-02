@@ -3,21 +3,42 @@
 import { X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
-import type { TaskFormState, TaskPriority } from "./types";
+import { CustomSelect } from "./CustomSelect";
+import type { StudyCategory, TaskFormState, TaskPriority } from "./types";
+
+const estimatePresets = [15, 25, 45, 60, 90];
 
 export function EditTaskModal({
   isOpen,
   editTaskForm,
   setEditTaskForm,
+  categories,
+  onManageCategories,
   onClose,
   onSubmit,
 }: {
   isOpen: boolean;
   editTaskForm: TaskFormState;
   setEditTaskForm: Dispatch<SetStateAction<TaskFormState>>;
+  categories: StudyCategory[];
+  onManageCategories: () => void;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const priorityOptions = [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+  ];
+  const categoryOptions = [
+    { value: "", label: "None" },
+    ...categories.map((category) => ({
+      value: category.id,
+      label: category.name,
+      color: category.color,
+    })),
+  ];
+
   return (
     <AnimatePresence>
       {isOpen ? (
@@ -84,46 +105,88 @@ export function EditTaskModal({
                   className="w-full resize-none rounded-xl border border-[#232f48] bg-[#111722] px-3 py-2.5 text-sm leading-6 text-white outline-none transition placeholder:text-[#556987] focus:border-blue-500/60"
                 />
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-3">
                 <div className="space-y-2">
                   <label htmlFor="edit-task-priority-input" className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
                     Priority
                   </label>
-                  <select
-                    id="edit-task-priority-input"
+                  <CustomSelect
                     value={editTaskForm.priority}
-                    onChange={(event) =>
+                    options={priorityOptions}
+                    onChange={(value) =>
                       setEditTaskForm((current) => ({
                         ...current,
-                        priority: event.target.value as TaskPriority,
+                        priority: value as TaskPriority,
                       }))
                     }
-                    className="h-10 w-full rounded-xl border border-[#232f48] bg-[#111722] px-3 text-sm text-white outline-none transition focus:border-blue-500/60"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
+                      Category
+                    </label>
+                    <button
+                      type="button"
+                      onClick={onManageCategories}
+                      className="text-xs font-semibold text-blue-300 transition hover:text-blue-200"
+                    >
+                      Manage
+                    </button>
+                  </div>
+                  <CustomSelect
+                    value={editTaskForm.categoryId}
+                    options={categoryOptions}
+                    onChange={(value) =>
+                      setEditTaskForm((current) => ({
+                        ...current,
+                        categoryId: value,
+                      }))
+                    }
+                  />
                 </div>
                 <div className="space-y-2">
                   <label htmlFor="edit-task-estimate-input" className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
-                    Pomodoros
+                    Minutes
                   </label>
                   <input
                     id="edit-task-estimate-input"
                     type="number"
-                    min={1}
-                    max={12}
-                    value={editTaskForm.estimatedPomodoros}
+                    min={0}
+                    value={editTaskForm.estimatedMinutes}
                     onChange={(event) =>
                       setEditTaskForm((current) => ({
                         ...current,
-                        estimatedPomodoros: Number(event.target.value),
+                        estimatedMinutes: event.target.value,
                       }))
                     }
                     className="h-10 w-full rounded-xl border border-[#232f48] bg-[#111722] px-3 text-sm text-white outline-none transition focus:border-blue-500/60"
                   />
                 </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {estimatePresets.map((minutes) => (
+                  <button
+                    key={minutes}
+                    type="button"
+                    onClick={() =>
+                      setEditTaskForm((current) => ({
+                        ...current,
+                        estimatedMinutes: String(minutes),
+                      }))
+                    }
+                    className="rounded-lg border border-[#232f48] bg-[#111722] px-2.5 py-1.5 text-xs font-semibold text-[#92a4c9] transition hover:text-white"
+                  >
+                    {minutes}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setEditTaskForm((current) => ({ ...current, estimatedMinutes: "" }))}
+                  className="rounded-lg border border-[#232f48] bg-[#111722] px-2.5 py-1.5 text-xs font-semibold text-[#92a4c9] transition hover:text-white"
+                >
+                  Custom
+                </button>
               </div>
             </div>
 
