@@ -3,7 +3,7 @@
 import { GitBranch, Network, Sparkles } from "lucide-react";
 import { motion } from "framer-motion";
 
-import type { StudyTask } from "./StudyModeView";
+import type { StudyTask } from "./types";
 
 type MindMapCanvasProps = {
   topic: string;
