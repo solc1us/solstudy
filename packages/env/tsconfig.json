@@ -1,0 +1,3 @@
+{
+  "extends": "@solstudy/config/tsconfig.base.json"
+}

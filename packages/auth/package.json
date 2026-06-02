@@ -1,0 +1,24 @@
+{
+  "name": "@solstudy/auth",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {},
+  "dependencies": {
+    "@solstudy/db": "workspace:*",
+    "@solstudy/env": "workspace:*",
+    "better-auth": "catalog:",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@solstudy/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

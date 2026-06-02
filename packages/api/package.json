@@ -1,0 +1,27 @@
+{
+  "name": "@solstudy/api",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {},
+  "dependencies": {
+    "@solstudy/auth": "workspace:*",
+    "@solstudy/db": "workspace:*",
+    "@solstudy/env": "workspace:*",
+    "@trpc/client": "catalog:",
+    "@trpc/server": "catalog:",
+    "dotenv": "catalog:",
+    "next": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@solstudy/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}
