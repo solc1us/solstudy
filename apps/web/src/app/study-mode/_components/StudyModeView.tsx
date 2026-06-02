@@ -2,575 +2,658 @@
 
 import {
   ArrowLeft,
-  Bot,
-  Brain,
+  BarChart3,
+  CalendarClock,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
+  Circle,
   Clock3,
-  FileText,
-  GitBranch,
-  GraduationCap,
-  Layers3,
+  Edit3,
+  Flame,
   Lightbulb,
+  ListChecks,
   Menu,
-  MessageSquare,
-  PanelLeftClose,
-  PanelRightClose,
-  Paperclip,
+  Pause,
+  Play,
   Plus,
   RotateCcw,
-  Send,
   Sparkles,
   Target,
+  TimerReset,
   Trash2,
   X,
-  Zap,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import ReactMarkdown from "react-markdown";
 import { useRouter } from "next/navigation";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import MindMapCanvas from "./MindMapCanvas";
-
-export interface Attachment {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  lastModified: number;
-}
-
-export interface ChatMessage {
-  id: string;
-  role: "user" | "ai";
-  content: string;
-  createdAt: number;
-  attachments?: Attachment[];
-}
-
-export interface Conversation {
-  id: string;
-  title: string;
-  messages: ChatMessage[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface Flashcard {
-  id: string;
-  type: "concept" | "term" | "question";
-  front: string;
-  back: string;
-}
-
-export interface KeyTakeaway {
-  id: string;
-  text: string;
-}
+export type TaskPriority = "low" | "medium" | "high";
+export type TaskStatus = "todo" | "active" | "done";
+export type PomodoroMode = "focus" | "short-break" | "long-break";
 
 export interface StudyTask {
   id: string;
   title: string;
-  status: "pending" | "active" | "done";
+  description?: string;
+  priority: TaskPriority;
+  estimatedPomodoros: number;
+  completedPomodoros: number;
+  status: TaskStatus;
+  createdAt: number;
+  updatedAt: number;
 }
 
-const CONVERSATIONS_KEY = "study-mode-conversations";
-const ACTIVE_TOPIC_KEY = "study-mode-active-topic";
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+export interface PomodoroState {
+  mode: PomodoroMode;
+  remainingSeconds: number;
+  isRunning: boolean;
+  selectedTaskId: string | null;
+  completedFocusSessions: number;
+}
 
-const initialFlashcards: Flashcard[] = [
-  {
-    id: "flash-1",
-    type: "concept",
-    front: "Active recall",
-    back: "Testing yourself from memory, then correcting gaps, builds stronger retention than rereading.",
-  },
-  {
-    id: "flash-2",
-    type: "term",
-    front: "Pomodoro reset",
-    back: "A short break after a focused sprint that protects attention and reduces fatigue.",
-  },
-  {
-    id: "flash-3",
-    type: "question",
-    front: "What makes a study task actionable?",
-    back: "It has a clear verb, a visible output, and a small enough scope to finish in one session.",
-  },
-];
+export interface IdeaVaultItem {
+  id: string;
+  title: string;
+  note: string;
+  tag?: string;
+  createdAt: number;
+}
 
-const initialTakeaways: KeyTakeaway[] = [
-  { id: "take-1", text: "Start with one narrow topic before expanding into examples." },
-  { id: "take-2", text: "Convert vague goals into tasks with a visible finish line." },
-  { id: "take-3", text: "Use quick quizzes to reveal what needs another pass." },
-];
+export interface ProductivityStats {
+  totalTasksToday: number;
+  completedTasks: number;
+  totalFocusSessions: number;
+}
+
+type TaskFormState = {
+  title: string;
+  description: string;
+  priority: TaskPriority;
+  estimatedPomodoros: number;
+};
+
+type IdeaFormState = {
+  title: string;
+  note: string;
+  tag: string;
+};
+
+const TASKS_KEY = "solstudy-tasks";
+const SELECTED_TASK_KEY = "solstudy-selected-task-id";
+const POMODORO_KEY = "solstudy-pomodoro-state";
+const IDEAS_KEY = "solstudy-ideas";
+const STATS_KEY = "solstudy-productivity-stats";
+
+const FOCUS_SECONDS = 25 * 60;
+const SHORT_BREAK_SECONDS = 5 * 60;
+const LONG_BREAK_SECONDS = 15 * 60;
+
+const emptyTaskForm: TaskFormState = {
+  title: "",
+  description: "",
+  priority: "medium",
+  estimatedPomodoros: 2,
+};
+
+const emptyIdeaForm: IdeaFormState = {
+  title: "",
+  note: "",
+  tag: "",
+};
 
 const initialTasks: StudyTask[] = [
-  { id: "task-1", title: "Define the main concept", status: "done" },
-  { id: "task-2", title: "Ask for a plain-language explanation", status: "active" },
-  { id: "task-3", title: "Create five recall questions", status: "pending" },
-  { id: "task-4", title: "Review flashcards", status: "pending" },
+  {
+    id: "task-seed-1",
+    title: "Outline biology chapter notes",
+    description: "Create a concise structure before reading details.",
+    priority: "high",
+    estimatedPomodoros: 2,
+    completedPomodoros: 1,
+    status: "active",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: "task-seed-2",
+    title: "Solve practice questions",
+    description: "Focus on the five hardest questions from the last set.",
+    priority: "medium",
+    estimatedPomodoros: 3,
+    completedPomodoros: 0,
+    status: "todo",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: "task-seed-3",
+    title: "Review flashcard misses",
+    description: "Turn recurring mistakes into one-line rules.",
+    priority: "low",
+    estimatedPomodoros: 1,
+    completedPomodoros: 1,
+    status: "done",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
 ];
-
-const quickActions = [
-  { label: "Explain this topic", icon: Lightbulb },
-  { label: "Quiz me", icon: GraduationCap },
-  { label: "Break this into tasks", icon: Layers3 },
-  { label: "Create flashcards", icon: Sparkles },
-] as const;
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createMockResponse(message: string, topic: string) {
-  const subject = topic.trim() || "your current study goal";
-  return [
-    `Here is a focused study pass for **${subject}**.`,
-    "",
-    `1. Start by writing the core idea in one sentence: ${message.slice(0, 120) || "what you want to learn"}.`,
-    "2. Split it into one concept to understand, one example to practice, and one recall question to answer without notes.",
-    "3. Use a 25-minute sprint, then mark one task as done before adding more work.",
-    "",
-    "**Next move:** ask me to quiz you or turn this into flashcards.",
-  ].join("\n");
+function getDurationForMode(mode: PomodoroMode) {
+  if (mode === "short-break") return SHORT_BREAK_SECONDS;
+  if (mode === "long-break") return LONG_BREAK_SECONDS;
+  return FOCUS_SECONDS;
 }
 
-function formatBytes(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+function formatTime(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
+  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${seconds}`;
 }
 
-function loadConversations() {
+function readLocalStorage<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
   try {
-    const raw = window.localStorage.getItem(CONVERSATIONS_KEY);
-    return raw ? (JSON.parse(raw) as Conversation[]) : [];
+    const stored = window.localStorage.getItem(key);
+    return stored ? (JSON.parse(stored) as T) : fallback;
   } catch {
-    return [];
+    return fallback;
   }
 }
 
-function titleFromMessages(messages: ChatMessage[]) {
-  const firstUserMessage = messages.find((message) => message.role === "user");
-  if (!firstUserMessage) return "New Study Session";
-  return firstUserMessage.content.replace(/\s+/g, " ").slice(0, 48) || "Attached study files";
+function priorityStyles(priority: TaskPriority) {
+  if (priority === "high") {
+    return "border-red-400/30 bg-red-500/10 text-red-200";
+  }
+  if (priority === "medium") {
+    return "border-blue-400/30 bg-blue-500/10 text-blue-200";
+  }
+  return "border-emerald-400/30 bg-emerald-500/10 text-emerald-200";
 }
 
-function groupConversations(conversations: Conversation[]) {
-  const groups: Record<string, Conversation[]> = {
-    Today: [],
-    Yesterday: [],
-    "Previous 7 Days": [],
-    Older: [],
-  };
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
-  const startOfPreviousWeek = startOfToday - 7 * 24 * 60 * 60 * 1000;
-
-  for (const conversation of conversations) {
-    if (conversation.updatedAt >= startOfToday) {
-      groups.Today.push(conversation);
-    } else if (conversation.updatedAt >= startOfYesterday) {
-      groups.Yesterday.push(conversation);
-    } else if (conversation.updatedAt >= startOfPreviousWeek) {
-      groups["Previous 7 Days"].push(conversation);
-    } else {
-      groups.Older.push(conversation);
-    }
+function statusStyles(status: TaskStatus) {
+  if (status === "done") {
+    return "border-emerald-400/30 bg-emerald-500/10 text-emerald-200";
   }
+  if (status === "active") {
+    return "border-blue-400/30 bg-blue-500/10 text-blue-200";
+  }
+  return "border-[#33415f] bg-[#232f48] text-[#92a4c9]";
+}
 
-  return groups;
+function modeLabel(mode: PomodoroMode) {
+  if (mode === "short-break") return "Short Break";
+  if (mode === "long-break") return "Long Break";
+  return "Focus";
 }
 
 export default function StudyModeView() {
   const router = useRouter();
   const [hasLoaded, setHasLoaded] = useState(false);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [activeTopic, setActiveTopic] = useState("");
-  const [viewMode, setViewMode] = useState<"chat" | "mindmap">("chat");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [knowledgeRailOpen, setKnowledgeRailOpen] = useState(true);
-  const [isLoading, setIsLoading] = useState(false);
-  const [masteryProgress, setMasteryProgress] = useState(42);
-  const [energyLevel, setEnergyLevel] = useState(84);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const [flashcards] = useState<Flashcard[]>(initialFlashcards);
-  const [takeaways] = useState<KeyTakeaway[]>(initialTakeaways);
   const [tasks, setTasks] = useState<StudyTask[]>(initialTasks);
-  const [showReviewModal, setShowReviewModal] = useState(false);
-  const [currentCardIndex, setCurrentCardIndex] = useState(0);
-  const [mindMapGenerated, setMindMapGenerated] = useState(false);
-
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialTasks[0]?.id ?? null);
+  const [pomodoro, setPomodoro] = useState<PomodoroState>({
+    mode: "focus",
+    remainingSeconds: FOCUS_SECONDS,
+    isRunning: false,
+    selectedTaskId: initialTasks[0]?.id ?? null,
+    completedFocusSessions: 0,
+  });
+  const [stats, setStats] = useState<ProductivityStats>({
+    totalTasksToday: initialTasks.length,
+    completedTasks: initialTasks.filter((task) => task.status === "done").length,
+    totalFocusSessions: 0,
+  });
+  const [taskForm, setTaskForm] = useState<TaskFormState>(emptyTaskForm);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [isIdeaVaultOpen, setIsIdeaVaultOpen] = useState(false);
+  const [ideas, setIdeas] = useState<IdeaVaultItem[]>([]);
+  const [ideaForm, setIdeaForm] = useState<IdeaFormState>(emptyIdeaForm);
 
   useEffect(() => {
-    const loadedConversations = loadConversations().sort((a, b) => b.updatedAt - a.updatedAt);
-    const savedTopic = window.localStorage.getItem(ACTIVE_TOPIC_KEY) ?? "";
+    const loadedTasks = readLocalStorage<StudyTask[]>(TASKS_KEY, initialTasks);
+    const loadedSelectedTaskId = readLocalStorage<string | null>(
+      SELECTED_TASK_KEY,
+      loadedTasks.find((task) => task.status !== "done")?.id ?? null,
+    );
+    const loadedPomodoro = readLocalStorage<PomodoroState>(POMODORO_KEY, {
+      mode: "focus",
+      remainingSeconds: FOCUS_SECONDS,
+      isRunning: false,
+      selectedTaskId: loadedSelectedTaskId,
+      completedFocusSessions: 0,
+    });
 
-    setConversations(loadedConversations);
-    setActiveTopic(savedTopic);
-    if (loadedConversations[0]) {
-      setCurrentConversationId(loadedConversations[0].id);
-      setMessages(loadedConversations[0].messages);
-    }
+    setTasks(loadedTasks);
+    setSelectedTaskId(loadedSelectedTaskId);
+    setPomodoro({
+      ...loadedPomodoro,
+      selectedTaskId: loadedSelectedTaskId,
+      isRunning: false,
+    });
+    setIdeas(readLocalStorage<IdeaVaultItem[]>(IDEAS_KEY, []));
+    setStats(
+      readLocalStorage<ProductivityStats>(STATS_KEY, {
+        totalTasksToday: loadedTasks.length,
+        completedTasks: loadedTasks.filter((task) => task.status === "done").length,
+        totalFocusSessions: loadedPomodoro.completedFocusSessions,
+      }),
+    );
     setHasLoaded(true);
   }, []);
 
   useEffect(() => {
     if (!hasLoaded) return;
-    window.localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations));
-  }, [conversations, hasLoaded]);
+    window.localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+    setStats((current) => ({
+      ...current,
+      totalTasksToday: tasks.length,
+      completedTasks: tasks.filter((task) => task.status === "done").length,
+    }));
+  }, [hasLoaded, tasks]);
 
   useEffect(() => {
     if (!hasLoaded) return;
-    window.localStorage.setItem(ACTIVE_TOPIC_KEY, activeTopic);
-  }, [activeTopic, hasLoaded]);
+    window.localStorage.setItem(SELECTED_TASK_KEY, JSON.stringify(selectedTaskId));
+  }, [hasLoaded, selectedTaskId]);
 
   useEffect(() => {
-    if (!currentConversationId) return;
-    setConversations((previous) =>
-      previous.map((conversation) =>
-        conversation.id === currentConversationId
-          ? {
-              ...conversation,
-              messages,
-              title: titleFromMessages(messages),
-              updatedAt: Date.now(),
-            }
-          : conversation,
-      ),
-    );
-  }, [currentConversationId, messages]);
+    if (!hasLoaded) return;
+    window.localStorage.setItem(POMODORO_KEY, JSON.stringify(pomodoro));
+  }, [hasLoaded, pomodoro]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+    if (!hasLoaded) return;
+    window.localStorage.setItem(IDEAS_KEY, JSON.stringify(ideas));
+  }, [hasLoaded, ideas]);
 
   useEffect(() => {
-    if (!textareaRef.current) return;
-    textareaRef.current.style.height = "auto";
-    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
-  }, [input]);
+    if (!hasLoaded) return;
+    window.localStorage.setItem(STATS_KEY, JSON.stringify(stats));
+  }, [hasLoaded, stats]);
 
-  const groupedConversations = useMemo(
-    () => groupConversations(conversations),
-    [conversations],
-  );
-
-  const currentFlashcard = flashcards[currentCardIndex];
-
-  const startNewSession = useCallback(() => {
-    const newConversation: Conversation = {
-      id: createId("conversation"),
-      title: "New Study Session",
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    setConversations((previous) => [newConversation, ...previous]);
-    setCurrentConversationId(newConversation.id);
-    setMessages([]);
-    setAttachments([]);
-    setInput("");
-  }, []);
-
-  const selectConversation = useCallback((conversation: Conversation) => {
-    setCurrentConversationId(conversation.id);
-    setMessages(conversation.messages);
-  }, []);
-
-  const deleteConversation = useCallback(
-    (conversationId: string) => {
-      setConversations((previous) => previous.filter((item) => item.id !== conversationId));
-      if (conversationId === currentConversationId) {
-        setCurrentConversationId(null);
-        setMessages([]);
-      }
-    },
-    [currentConversationId],
-  );
-
-  const ensureConversation = useCallback(() => {
-    if (currentConversationId) return currentConversationId;
-    const newConversation: Conversation = {
-      id: createId("conversation"),
-      title: "New Study Session",
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    setConversations((previous) => [newConversation, ...previous]);
-    setCurrentConversationId(newConversation.id);
-    return newConversation.id;
-  }, [currentConversationId]);
-
-  const updateTasksForPrompt = useCallback((prompt: string) => {
-    const normalizedPrompt = prompt.toLowerCase();
-    if (normalizedPrompt.includes("task") || normalizedPrompt.includes("break")) {
-      setTasks((previous) =>
-        previous.map((task, index) => ({
-          ...task,
-          status: index === 0 ? "done" : index === 1 ? "active" : "pending",
-        })),
-      );
-      setMindMapGenerated(true);
-    }
-  }, []);
-
-  const sendMessage = useCallback(async () => {
-    const trimmedInput = input.trim();
-    if ((!trimmedInput && attachments.length === 0) || isLoading) return;
-
-    ensureConversation();
-    const outgoingAttachments = attachments;
-    const userMessage: ChatMessage = {
-      id: createId("message"),
-      role: "user",
-      content:
-        trimmedInput ||
-        `Attached ${outgoingAttachments.length} file${outgoingAttachments.length === 1 ? "" : "s"} for study help.`,
-      createdAt: Date.now(),
-      attachments: outgoingAttachments.length ? outgoingAttachments : undefined,
-    };
-    const nextMessages = [...messages, userMessage];
-
-    setMessages(nextMessages);
-    setInput("");
-    setAttachments([]);
-    setAttachmentError(null);
-    setIsLoading(true);
-
-    let aiContent = createMockResponse(userMessage.content, activeTopic);
-    try {
-      const response = await fetch("/api/chat-productive", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMessage.content,
-          history: nextMessages,
-          topic: activeTopic,
-          attachments: outgoingAttachments,
-        }),
-      });
-
-      if (response.ok) {
-        const data = (await response.json()) as { message?: string };
-        if (data.message) aiContent = data.message;
-      }
-    } catch {
-      aiContent = createMockResponse(userMessage.content, activeTopic);
-    }
-
-    const aiMessage: ChatMessage = {
-      id: createId("message"),
-      role: "ai",
-      content: aiContent,
-      createdAt: Date.now(),
-    };
-
-    setMessages((previous) => [...previous, aiMessage]);
-    setMasteryProgress((previous) => Math.min(previous + 4, 100));
-    setEnergyLevel((previous) => Math.max(previous - 2, 35));
-    updateTasksForPrompt(userMessage.content);
-    setIsLoading(false);
-  }, [
-    activeTopic,
-    attachments,
-    ensureConversation,
-    input,
-    isLoading,
-    messages,
-    updateTasksForPrompt,
-  ]);
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      void sendMessage();
-    }
-  };
-
-  const handleFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    if (!files.length) return;
-
-    const oversized = files.find((file) => file.size > MAX_FILE_SIZE);
-    if (oversized) {
-      setAttachmentError(`${oversized.name} is larger than 10MB.`);
-      event.target.value = "";
+  const completeFocusSession = useCallback(() => {
+    const taskId = selectedTaskId;
+    if (!taskId) {
+      setPomodoro((current) => ({
+        ...current,
+        isRunning: false,
+        remainingSeconds: getDurationForMode(current.mode),
+      }));
       return;
     }
 
-    setAttachments((previous) => [
-      ...previous,
-      ...files.map((file) => ({
-        id: createId("attachment"),
-        name: file.name,
-        size: file.size,
-        type: file.type || "unknown",
-        lastModified: file.lastModified,
+    setTasks((currentTasks) =>
+      currentTasks.map((task) => {
+        if (task.id !== taskId) return task;
+        const nextCompletedPomodoros = Math.min(
+          task.completedPomodoros + 1,
+          Math.max(task.estimatedPomodoros, task.completedPomodoros + 1),
+        );
+        return {
+          ...task,
+          completedPomodoros: nextCompletedPomodoros,
+          status:
+            task.status === "done"
+              ? "done"
+              : nextCompletedPomodoros >= task.estimatedPomodoros
+                ? "done"
+                : "active",
+          updatedAt: Date.now(),
+        };
+      }),
+    );
+
+    setStats((current) => ({
+      ...current,
+      totalFocusSessions: current.totalFocusSessions + 1,
+    }));
+
+    setPomodoro((current) => {
+      const completedFocusSessions = current.completedFocusSessions + 1;
+      const nextMode: PomodoroMode =
+        completedFocusSessions % 4 === 0 ? "long-break" : "short-break";
+      return {
+        mode: nextMode,
+        remainingSeconds: getDurationForMode(nextMode),
+        isRunning: false,
+        selectedTaskId: taskId,
+        completedFocusSessions,
+      };
+    });
+  }, [selectedTaskId]);
+
+  useEffect(() => {
+    if (!pomodoro.isRunning) return;
+
+    const intervalId = window.setInterval(() => {
+      setPomodoro((current) => {
+        if (!current.isRunning) return current;
+        if (current.remainingSeconds <= 1) {
+          window.setTimeout(completeFocusSession, 0);
+          return {
+            ...current,
+            remainingSeconds: 0,
+            isRunning: false,
+          };
+        }
+        return {
+          ...current,
+          remainingSeconds: current.remainingSeconds - 1,
+        };
+      });
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [completeFocusSession, pomodoro.isRunning]);
+
+  const activeTasks = useMemo(
+    () => tasks.filter((task) => task.status !== "done").sort((a, b) => b.updatedAt - a.updatedAt),
+    [tasks],
+  );
+  const completedTasks = useMemo(
+    () => tasks.filter((task) => task.status === "done").sort((a, b) => b.updatedAt - a.updatedAt),
+    [tasks],
+  );
+  const selectedTask = useMemo(
+    () => tasks.find((task) => task.id === selectedTaskId) ?? null,
+    [selectedTaskId, tasks],
+  );
+  const timerProgress =
+    1 - pomodoro.remainingSeconds / Math.max(getDurationForMode(pomodoro.mode), 1);
+  const longBreakDue =
+    pomodoro.completedFocusSessions > 0 && pomodoro.completedFocusSessions % 4 === 0;
+
+  const selectTask = useCallback((taskId: string) => {
+    setSelectedTaskId(taskId);
+    setPomodoro((current) => ({
+      ...current,
+      selectedTaskId: taskId,
+      mode: current.mode === "focus" ? current.mode : "focus",
+      remainingSeconds: current.mode === "focus" ? current.remainingSeconds : FOCUS_SECONDS,
+    }));
+    setTasks((currentTasks) =>
+      currentTasks.map((task) => ({
+        ...task,
+        status:
+          task.id === taskId
+            ? task.status === "done"
+              ? "done"
+              : "active"
+            : task.status === "active"
+              ? "todo"
+              : task.status,
+        updatedAt: task.id === taskId ? Date.now() : task.updatedAt,
       })),
-    ]);
-    setAttachmentError(null);
-    event.target.value = "";
+    );
+  }, []);
+
+  const resetTaskForm = () => {
+    setTaskForm(emptyTaskForm);
+    setEditingTaskId(null);
   };
 
-  const generateMindMap = () => {
-    const source = activeTopic.trim() || messages.at(-1)?.content || "Study plan";
-    const generatedTasks: StudyTask[] = [
-      { id: createId("task"), title: `Map ${source.slice(0, 24)}`, status: "active" },
-      { id: createId("task"), title: "List sub-concepts", status: "pending" },
-      { id: createId("task"), title: "Add practice examples", status: "pending" },
-      { id: createId("task"), title: "Schedule review pass", status: "pending" },
-    ];
-    setTasks(generatedTasks);
-    setMindMapGenerated(true);
-    setViewMode("mindmap");
+  const handleTaskSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const title = taskForm.title.trim();
+    if (!title) return;
+
+    if (editingTaskId) {
+      setTasks((currentTasks) =>
+        currentTasks.map((task) =>
+          task.id === editingTaskId
+            ? {
+                ...task,
+                title,
+                description: taskForm.description.trim(),
+                priority: taskForm.priority,
+                estimatedPomodoros: Math.max(1, taskForm.estimatedPomodoros),
+                updatedAt: Date.now(),
+              }
+            : task,
+        ),
+      );
+      resetTaskForm();
+      return;
+    }
+
+    const newTask: StudyTask = {
+      id: createId("task"),
+      title,
+      description: taskForm.description.trim(),
+      priority: taskForm.priority,
+      estimatedPomodoros: Math.max(1, taskForm.estimatedPomodoros),
+      completedPomodoros: 0,
+      status: "todo",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setTasks((currentTasks) => [newTask, ...currentTasks]);
+    selectTask(newTask.id);
+    resetTaskForm();
   };
 
-  const completeReview = () => {
-    setShowReviewModal(false);
-    setCurrentCardIndex(0);
-    setMasteryProgress((previous) => Math.min(previous + 8, 100));
-    setTasks((previous) =>
-      previous.map((task) =>
-        task.title.toLowerCase().includes("flashcard") ? { ...task, status: "done" } : task,
+  const editTask = (task: StudyTask) => {
+    setEditingTaskId(task.id);
+    setTaskForm({
+      title: task.title,
+      description: task.description ?? "",
+      priority: task.priority,
+      estimatedPomodoros: task.estimatedPomodoros,
+    });
+  };
+
+  const deleteTask = (taskId: string) => {
+    setTasks((currentTasks) => currentTasks.filter((task) => task.id !== taskId));
+    if (selectedTaskId === taskId) {
+      const fallbackTask = tasks.find((task) => task.id !== taskId && task.status !== "done");
+      const fallbackId = fallbackTask?.id ?? null;
+      setSelectedTaskId(fallbackId);
+      setPomodoro((current) => ({
+        ...current,
+        selectedTaskId: fallbackId,
+        isRunning: false,
+      }));
+    }
+  };
+
+  const markTaskDone = (taskId: string) => {
+    setTasks((currentTasks) =>
+      currentTasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              status: "done",
+              completedPomodoros: Math.max(task.completedPomodoros, task.estimatedPomodoros),
+              updatedAt: Date.now(),
+            }
+          : task,
       ),
+    );
+    setPomodoro((current) =>
+      current.selectedTaskId === taskId
+        ? {
+            ...current,
+            isRunning: false,
+          }
+        : current,
     );
   };
 
+  const startTimer = () => {
+    if (!selectedTask) return;
+    selectTask(selectedTask.id);
+    setPomodoro((current) => ({
+      ...current,
+      mode: current.remainingSeconds === 0 ? "focus" : current.mode,
+      remainingSeconds: current.remainingSeconds === 0 ? FOCUS_SECONDS : current.remainingSeconds,
+      selectedTaskId: selectedTask.id,
+      isRunning: true,
+    }));
+  };
+
+  const pauseTimer = () => {
+    setPomodoro((current) => ({ ...current, isRunning: false }));
+  };
+
+  const resetTimer = () => {
+    setPomodoro((current) => ({
+      ...current,
+      isRunning: false,
+      remainingSeconds: getDurationForMode(current.mode),
+    }));
+  };
+
+  const switchMode = (mode: PomodoroMode) => {
+    setPomodoro((current) => ({
+      ...current,
+      mode,
+      isRunning: false,
+      remainingSeconds: getDurationForMode(mode),
+    }));
+  };
+
+  const submitIdea = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const title = ideaForm.title.trim();
+    const note = ideaForm.note.trim();
+    if (!title || !note) return;
+
+    setIdeas((currentIdeas) => [
+      {
+        id: createId("idea"),
+        title,
+        note,
+        tag: ideaForm.tag.trim() || undefined,
+        createdAt: Date.now(),
+      },
+      ...currentIdeas,
+    ]);
+    setIdeaForm(emptyIdeaForm);
+  };
+
   return (
-    <div className="h-full min-h-0 overflow-hidden bg-[#111722] text-white">
+    <div className="relative h-full min-h-0 overflow-hidden bg-[#111722] text-white">
       <div className="flex h-full min-h-0 overflow-hidden">
         <AnimatePresence initial={false}>
           {sidebarOpen ? (
             <motion.aside
-              key="left-sidebar"
+              key="productivity-sidebar"
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 292, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
               className="hidden h-full shrink-0 overflow-hidden border-r border-[#232f48] bg-[#111722]/95 shadow-2xl shadow-black/20 backdrop-blur md:flex md:flex-col"
             >
-              <div className="flex items-center justify-between border-b border-[#232f48] p-4">
-                <button
-                  type="button"
-                  onClick={() => setSidebarOpen(false)}
-                  className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white"
-                  aria-label="Collapse session sidebar"
-                >
-                  <PanelLeftClose size={19} />
-                </button>
-                <button
-                  type="button"
-                  onClick={startNewSession}
-                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-[0_0_22px_rgba(19,91,236,0.35)] transition hover:bg-blue-500"
-                >
-                  <Plus size={16} />
-                  New
-                </button>
-              </div>
-
-              <div className="space-y-3 border-b border-[#232f48] p-4">
-                <div className="rounded-2xl border border-[#232f48] bg-[#1a2332] p-4">
-                  <div className="mb-3 flex items-center justify-between text-xs font-semibold uppercase tracking-wider">
-                    <span className="text-[#92a4c9]">Mental Energy</span>
-                    <span className="text-emerald-300">{energyLevel}%</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-[#111722]">
-                    <div
-                      className="h-2 rounded-full bg-gradient-to-r from-blue-600 to-emerald-400 shadow-[0_0_18px_rgba(52,211,153,0.45)]"
-                      style={{ width: `${energyLevel}%` }}
-                    />
-                  </div>
-                  <p className="mt-3 text-xs text-[#556987]">Optimal for a focused study sprint</p>
-                </div>
-
-                <div className="rounded-2xl border border-[#232f48] bg-[#1a2332] p-4">
-                  <div className="flex items-center justify-between">
+              <div className="border-b border-[#232f48] p-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600/15 text-blue-300 shadow-[0_0_24px_rgba(19,91,236,0.28)]">
+                      <Sparkles size={20} />
+                    </div>
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-wider text-[#92a4c9]">
-                        Focus Session
-                      </p>
-                      <p className="mt-1 text-lg font-semibold text-white">21:40</p>
-                    </div>
-                    <div className="rounded-xl bg-emerald-400/10 p-3 text-emerald-300">
-                      <Clock3 size={20} />
+                      <p className="text-sm font-semibold text-white">SolStudy</p>
+                      <p className="text-xs text-[#556987]">Productivity mode</p>
                     </div>
                   </div>
-                  <div className="mt-3 h-1.5 rounded-full bg-[#111722]">
-                    <div className="h-1.5 w-[62%] rounded-full bg-emerald-400" />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSidebarOpen(false)}
+                    className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white"
+                    aria-label="Collapse sidebar"
+                  >
+                    <X size={18} />
+                  </button>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetTaskForm();
+                    window.setTimeout(() => document.getElementById("task-title-input")?.focus(), 0);
+                  }}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-semibold text-white shadow-[0_0_22px_rgba(19,91,236,0.35)] transition hover:bg-blue-500"
+                >
+                  <Plus size={17} />
+                  New Task
+                </button>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto p-3">
-                {Object.entries(groupedConversations).map(([group, items]) =>
-                  items.length ? (
-                    <div key={group} className="mb-4">
-                      <h3 className="px-2 pb-2 text-[11px] font-bold uppercase tracking-wider text-[#556987]">
-                        {group}
-                      </h3>
-                      <div className="space-y-1">
-                        {items.map((conversation) => (
-                          <button
-                            type="button"
-                            key={conversation.id}
-                            onClick={() => selectConversation(conversation)}
-                            className={`group flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition ${
-                              conversation.id === currentConversationId
-                                ? "border-blue-500/40 bg-blue-600/12 text-white"
-                                : "border-transparent text-[#92a4c9] hover:border-[#232f48] hover:bg-[#1a2332] hover:text-white"
-                            }`}
-                          >
-                            <MessageSquare size={15} className="shrink-0" />
-                            <span className="min-w-0 flex-1 truncate text-sm">{conversation.title}</span>
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                deleteConversation(conversation.id);
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  deleteConversation(conversation.id);
-                                }
-                              }}
-                              className="rounded-lg p-1 text-[#556987] opacity-0 transition hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100"
-                              aria-label={`Delete ${conversation.title}`}
-                            >
-                              <Trash2 size={14} />
-                            </span>
-                          </button>
-                        ))}
-                      </div>
+              <nav className="space-y-1 border-b border-[#232f48] p-3">
+                {[
+                  { label: "Today", icon: Target, active: true },
+                  { label: "Upcoming", icon: CalendarClock, active: false },
+                  { label: "Completed", icon: CheckCircle2, active: false },
+                ].map((item) => (
+                  <button
+                    type="button"
+                    key={item.label}
+                    className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-sm font-medium transition ${
+                      item.active
+                        ? "border-blue-500/40 bg-blue-600/15 text-white"
+                        : "border-transparent text-[#92a4c9] hover:border-[#232f48] hover:bg-[#1a2332] hover:text-white"
+                    }`}
+                  >
+                    <item.icon size={17} />
+                    {item.label}
+                  </button>
+                ))}
+                {[
+                  { label: "AI Chat", icon: Sparkles },
+                  { label: "Mind Map", icon: BarChart3 },
+                  { label: "Review Cards", icon: ListChecks },
+                ].map((item) => (
+                  <button
+                    type="button"
+                    key={item.label}
+                    className="flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2.5 text-sm font-medium text-[#92a4c9] transition hover:border-[#232f48] hover:bg-[#1a2332] hover:text-white"
+                  >
+                    <span className="flex items-center gap-3">
+                      <item.icon size={17} />
+                      {item.label}
+                    </span>
+                    <span className="rounded-full bg-[#232f48] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#556987]">
+                      Soon
+                    </span>
+                  </button>
+                ))}
+              </nav>
+
+              <div className="space-y-3 p-4">
+                <div className="rounded-2xl border border-[#232f48] bg-[#1a2332] p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
+                    Today Stats
+                  </p>
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="rounded-xl bg-[#111722] p-3 text-center">
+                      <p className="text-lg font-semibold text-white">{stats.totalTasksToday}</p>
+                      <p className="mt-1 text-[10px] text-[#92a4c9]">Tasks</p>
                     </div>
-                  ) : null,
-                )}
-                {!conversations.length ? (
-                  <div className="rounded-2xl border border-dashed border-[#232f48] p-4 text-sm text-[#92a4c9]">
-                    No sessions yet. Start by asking about a topic.
+                    <div className="rounded-xl bg-[#111722] p-3 text-center">
+                      <p className="text-lg font-semibold text-emerald-300">{stats.completedTasks}</p>
+                      <p className="mt-1 text-[10px] text-[#92a4c9]">Done</p>
+                    </div>
+                    <div className="rounded-xl bg-[#111722] p-3 text-center">
+                      <p className="text-lg font-semibold text-blue-300">{stats.totalFocusSessions}</p>
+                      <p className="mt-1 text-[10px] text-[#92a4c9]">Focus</p>
+                    </div>
                   </div>
-                ) : null}
+                </div>
+
+                <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/8 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-xl bg-emerald-400/10 p-3 text-emerald-300">
+                      <Flame size={19} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-white">Focus Rhythm</p>
+                      <p className="text-xs text-[#92a4c9]">
+                        {longBreakDue ? "Long break is due" : "Work in 25 minute sprints"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </motion.aside>
           ) : null}
@@ -578,444 +661,580 @@ export default function StudyModeView() {
 
         <main className="flex min-w-0 flex-1 flex-col">
           <header className="shrink-0 border-b border-[#232f48] bg-[#111722]/90 p-3 backdrop-blur sm:p-4">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-center gap-2">
                 {!sidebarOpen ? (
                   <button
                     type="button"
                     onClick={() => setSidebarOpen(true)}
                     className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white"
-                    aria-label="Open session sidebar"
+                    aria-label="Open sidebar"
                   >
                     <Menu size={20} />
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => router.back()}
-                  className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white"
-                  aria-label="Go back"
-                >
-                  <ArrowLeft size={20} />
-                </button>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h1 className="text-lg font-semibold text-white sm:text-xl">SolStudy</h1>
+                    <h1 className="text-xl font-semibold text-white">Today's Focus</h1>
                     <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-semibold text-blue-300">
-                      Study Mode
+                      Pomodoro
                     </span>
                   </div>
-                  <p className="text-xs text-[#92a4c9]">AI chat, focus planning, and recall tools</p>
+                  <p className="text-xs text-[#92a4c9]">
+                    Plan your study tasks, pick one target, and run focused Pomodoro sessions.
+                  </p>
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-                <div className="flex min-w-0 items-center gap-2 rounded-2xl border border-[#232f48] bg-[#1a2332] px-3 py-2">
-                  <Target size={16} className="shrink-0 text-blue-300" />
-                  <input
-                    value={activeTopic}
-                    onChange={(event) => setActiveTopic(event.target.value)}
-                    placeholder="Set active topic"
-                    className="min-w-0 bg-transparent text-sm text-white placeholder:text-[#556987] outline-none"
-                  />
+              <div className="grid grid-cols-3 gap-2 rounded-2xl border border-[#232f48] bg-[#1a2332] p-2">
+                <div className="px-3 py-1.5 text-center">
+                  <p className="text-sm font-semibold text-white">{activeTasks.length}</p>
+                  <p className="text-[10px] uppercase tracking-wider text-[#556987]">Active</p>
                 </div>
-                <div className="grid grid-cols-2 rounded-2xl border border-[#232f48] bg-[#1a2332] p-1 text-sm">
-                  {(["chat", "mindmap"] as const).map((mode) => (
-                    <button
-                      type="button"
-                      key={mode}
-                      onClick={() => setViewMode(mode)}
-                      className={`rounded-xl px-3 py-2 font-semibold capitalize transition ${
-                        viewMode === mode ? "bg-blue-600 text-white" : "text-[#92a4c9] hover:text-white"
-                      }`}
-                    >
-                      {mode === "mindmap" ? "Mind Map" : "Chat"}
-                    </button>
-                  ))}
+                <div className="px-3 py-1.5 text-center">
+                  <p className="text-sm font-semibold text-emerald-300">{completedTasks.length}</p>
+                  <p className="text-[10px] uppercase tracking-wider text-[#556987]">Done</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setKnowledgeRailOpen((open) => !open)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#232f48] bg-[#1a2332] px-3 py-2 text-sm font-semibold text-[#92a4c9] transition hover:text-white"
-                >
-                  <PanelRightClose size={16} />
-                  Knowledge
-                </button>
+                <div className="px-3 py-1.5 text-center">
+                  <p className="text-sm font-semibold text-blue-300">{pomodoro.completedFocusSessions}</p>
+                  <p className="text-[10px] uppercase tracking-wider text-[#556987]">Cycles</p>
+                </div>
               </div>
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {viewMode === "chat" ? (
-              <section className="flex h-full min-h-0 flex-col">
-                <div className="shrink-0 border-b border-[#232f48]/70 bg-[#111722] p-4">
-                  <div className="rounded-2xl border border-[#232f48] bg-[#1a2332] p-4 shadow-lg shadow-black/15">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="rounded-xl bg-blue-500/10 p-3 text-blue-300">
-                          <Brain size={22} />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-white">Mastery Progress</p>
-                          <p className="text-xs text-[#92a4c9]">Focus indicator: deep work active</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-semibold text-emerald-300">{masteryProgress}%</span>
-                        <div className="h-2 w-40 rounded-full bg-[#111722]">
-                          <div
-                            className="h-2 rounded-full bg-gradient-to-r from-blue-600 to-emerald-400"
-                            style={{ width: `${masteryProgress}%` }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-                  {!messages.length ? (
-                    <div className="mx-auto flex max-w-3xl flex-col items-center justify-center py-14 text-center">
-                      <div className="mb-5 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-5 text-blue-300 shadow-[0_0_40px_rgba(19,91,236,0.22)]">
-                        <Bot size={34} />
-                      </div>
-                      <h2 className="text-2xl font-semibold text-white">Start a focused study session</h2>
-                      <p className="mt-3 max-w-xl text-sm leading-6 text-[#92a4c9]">
-                        Pick a topic, attach study material, or use a quick action to begin.
+          <div className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top_right,rgba(19,91,236,0.16),transparent_34rem)] p-4 sm:p-6">
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
+              <section className="space-y-5">
+                <form
+                  onSubmit={handleTaskSubmit}
+                  className="rounded-2xl border border-[#232f48] bg-[#1a2332]/95 p-4 shadow-2xl shadow-black/15 backdrop-blur sm:p-5"
+                >
+                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold text-white">
+                        {editingTaskId ? "Edit Task" : "Create Task"}
+                      </h2>
+                      <p className="text-sm text-[#92a4c9]">
+                        Define a clear output before starting the timer.
                       </p>
                     </div>
-                  ) : (
-                    <div className="mx-auto max-w-4xl space-y-4">
-                      {messages.map((message) => (
+                    {editingTaskId ? (
+                      <button
+                        type="button"
+                        onClick={resetTaskForm}
+                        className="rounded-xl border border-[#232f48] px-3 py-2 text-sm font-semibold text-[#92a4c9] transition hover:text-white"
+                      >
+                        Cancel Edit
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_10rem_8rem]">
+                    <div className="space-y-2">
+                      <label htmlFor="task-title-input" className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
+                        Task title
+                      </label>
+                      <input
+                        id="task-title-input"
+                        value={taskForm.title}
+                        onChange={(event) =>
+                          setTaskForm((current) => ({ ...current, title: event.target.value }))
+                        }
+                        placeholder="What needs focus?"
+                        className="h-11 w-full rounded-xl border border-[#232f48] bg-[#111722] px-3 text-sm text-white outline-none transition placeholder:text-[#556987] focus:border-blue-500/60"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="task-priority-input" className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
+                        Priority
+                      </label>
+                      <select
+                        id="task-priority-input"
+                        value={taskForm.priority}
+                        onChange={(event) =>
+                          setTaskForm((current) => ({
+                            ...current,
+                            priority: event.target.value as TaskPriority,
+                          }))
+                        }
+                        className="h-11 w-full rounded-xl border border-[#232f48] bg-[#111722] px-3 text-sm text-white outline-none transition focus:border-blue-500/60"
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="task-estimate-input" className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
+                        Pomos
+                      </label>
+                      <input
+                        id="task-estimate-input"
+                        type="number"
+                        min={1}
+                        max={12}
+                        value={taskForm.estimatedPomodoros}
+                        onChange={(event) =>
+                          setTaskForm((current) => ({
+                            ...current,
+                            estimatedPomodoros: Number(event.target.value),
+                          }))
+                        }
+                        className="h-11 w-full rounded-xl border border-[#232f48] bg-[#111722] px-3 text-sm text-white outline-none transition focus:border-blue-500/60"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_9rem]">
+                    <textarea
+                      value={taskForm.description}
+                      onChange={(event) =>
+                        setTaskForm((current) => ({ ...current, description: event.target.value }))
+                      }
+                      placeholder="Optional description"
+                      rows={3}
+                      className="w-full resize-none rounded-xl border border-[#232f48] bg-[#111722] px-3 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-[#556987] focus:border-blue-500/60"
+                    />
+                    <button
+                      type="submit"
+                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-[0_0_22px_rgba(19,91,236,0.35)] transition hover:bg-blue-500"
+                    >
+                      <Plus size={17} />
+                      {editingTaskId ? "Save" : "Add Task"}
+                    </button>
+                  </div>
+                </form>
+
+                <TaskSection
+                  title="Active Tasks"
+                  subtitle="Pick the task you want the timer to work on."
+                  tasks={activeTasks}
+                  selectedTaskId={selectedTaskId}
+                  onSelectTask={selectTask}
+                  onEditTask={editTask}
+                  onDeleteTask={deleteTask}
+                  onMarkDone={markTaskDone}
+                />
+
+                <TaskSection
+                  title="Completed Tasks"
+                  subtitle="Finished work stays visible for daily momentum."
+                  tasks={completedTasks}
+                  selectedTaskId={selectedTaskId}
+                  onSelectTask={selectTask}
+                  onEditTask={editTask}
+                  onDeleteTask={deleteTask}
+                  onMarkDone={markTaskDone}
+                  emptyText="No completed tasks yet."
+                />
+              </section>
+
+              <aside className="space-y-5">
+                <section className="sticky top-0 rounded-2xl border border-[#232f48] bg-[#1a2332]/95 p-5 shadow-2xl shadow-black/20 backdrop-blur">
+                  <div className="mb-5 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-blue-300">
+                        Pomodoro Panel
+                      </p>
+                      <h2 className="mt-1 text-lg font-semibold text-white">{modeLabel(pomodoro.mode)}</h2>
+                    </div>
+                    <div className="rounded-2xl bg-blue-500/10 p-3 text-blue-300 shadow-[0_0_24px_rgba(19,91,236,0.22)]">
+                      <Clock3 size={22} />
+                    </div>
+                  </div>
+
+                  {selectedTask ? (
+                    <>
+                      <div className="mb-5 rounded-2xl border border-[#232f48] bg-[#111722] p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
+                          Selected Task
+                        </p>
+                        <h3 className="mt-2 text-base font-semibold text-white">{selectedTask.title}</h3>
+                        <p className="mt-2 text-sm leading-6 text-[#92a4c9]">
+                          {selectedTask.description || "No description added."}
+                        </p>
+                      </div>
+
+                      <div className="relative mx-auto mb-5 flex aspect-square max-w-[17rem] items-center justify-center rounded-full border border-[#232f48] bg-[#111722] shadow-inner">
                         <div
-                          key={message.id}
-                          className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-                        >
-                          <div
-                            className={`max-w-[min(44rem,92%)] rounded-2xl border px-4 py-3 shadow-xl shadow-black/10 ${
-                              message.role === "user"
-                                ? "border-blue-500/30 bg-blue-600 text-white"
-                                : "border-[#232f48] bg-[#1a2332] text-[#dce6f7]"
+                          className="absolute inset-3 rounded-full"
+                          style={{
+                            background: `conic-gradient(#135bec ${Math.max(timerProgress, 0) * 360}deg, #232f48 0deg)`,
+                          }}
+                        />
+                        <div className="absolute inset-6 rounded-full bg-[#111722]" />
+                        <div className="relative text-center">
+                          <p className="text-5xl font-semibold tracking-tight text-white">
+                            {formatTime(pomodoro.remainingSeconds)}
+                          </p>
+                          <p className="mt-2 text-xs uppercase tracking-wider text-[#92a4c9]">
+                            {pomodoro.isRunning ? "Running" : "Paused"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mb-4 grid grid-cols-3 gap-2">
+                        {(["focus", "short-break", "long-break"] as const).map((mode) => (
+                          <button
+                            type="button"
+                            key={mode}
+                            onClick={() => switchMode(mode)}
+                            className={`rounded-xl border px-2 py-2 text-xs font-semibold transition ${
+                              pomodoro.mode === mode
+                                ? "border-blue-500/50 bg-blue-600 text-white"
+                                : "border-[#232f48] bg-[#111722] text-[#92a4c9] hover:text-white"
                             }`}
                           >
-                            {message.role === "ai" ? (
-                              <div className="prose prose-invert max-w-none prose-p:my-2 prose-li:my-1 prose-strong:text-white">
-                                <ReactMarkdown>{message.content}</ReactMarkdown>
-                              </div>
-                            ) : (
-                              <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
-                            )}
-                            {message.attachments?.length ? (
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                {message.attachments.map((attachment) => (
-                                  <span
-                                    key={attachment.id}
-                                    className="inline-flex items-center gap-2 rounded-lg bg-black/20 px-2 py-1 text-xs"
-                                  >
-                                    <FileText size={13} />
-                                    {attachment.name}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
-                      {isLoading ? (
-                        <div className="flex justify-start">
-                          <div className="rounded-2xl border border-[#232f48] bg-[#1a2332] px-4 py-3 text-sm text-[#92a4c9]">
-                            <span className="inline-flex items-center gap-2">
-                              <Zap size={15} className="text-blue-300" />
-                              Thinking through the next useful step...
-                            </span>
-                          </div>
-                        </div>
-                      ) : null}
-                      <div ref={chatEndRef} />
-                    </div>
-                  )}
-                </div>
-
-                <div className="shrink-0 border-t border-[#232f48] bg-[#111722]/95 p-3 backdrop-blur sm:p-4">
-                  <div className="mx-auto max-w-4xl">
-                    <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-                      {quickActions.map(({ label, icon: Icon }) => (
-                        <button
-                          type="button"
-                          key={label}
-                          onClick={() => setInput(label)}
-                          className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-[#232f48] bg-[#1a2332] px-3 py-2 text-xs font-semibold text-[#c5d3ef] transition hover:border-blue-500/40 hover:text-white"
-                        >
-                          <Icon size={14} className="text-blue-300" />
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-
-                    {attachments.length ? (
-                      <div className="mb-2 flex flex-wrap gap-2">
-                        {attachments.map((attachment) => (
-                          <span
-                            key={attachment.id}
-                            className="inline-flex items-center gap-2 rounded-xl border border-[#232f48] bg-[#1a2332] px-3 py-2 text-xs text-[#c5d3ef]"
-                          >
-                            <FileText size={14} className="text-blue-300" />
-                            <span>{attachment.name}</span>
-                            <span className="text-[#556987]">{formatBytes(attachment.size)}</span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setAttachments((previous) =>
-                                  previous.filter((item) => item.id !== attachment.id),
-                                )
-                              }
-                              className="rounded-md p-0.5 text-[#92a4c9] transition hover:bg-red-500/10 hover:text-red-300"
-                              aria-label={`Remove ${attachment.name}`}
-                            >
-                              <X size={13} />
-                            </button>
-                          </span>
+                            {modeLabel(mode)}
+                          </button>
                         ))}
                       </div>
-                    ) : null}
-                    {attachmentError ? (
-                      <p className="mb-2 text-xs text-red-300">{attachmentError}</p>
-                    ) : null}
 
-                    <div className="flex items-end gap-2 rounded-2xl border border-[#232f48] bg-[#1a2332] p-2 shadow-2xl shadow-black/20 focus-within:border-blue-500/60">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={handleFiles}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="rounded-xl p-3 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white"
-                        aria-label="Attach files"
-                      >
-                        <Paperclip size={19} />
-                      </button>
-                      <textarea
-                        ref={textareaRef}
-                        value={input}
-                        onChange={(event) => setInput(event.target.value)}
-                        onKeyDown={handleKeyDown}
-                        rows={1}
-                        placeholder="Ask a study question..."
-                        className="max-h-44 min-h-12 flex-1 resize-none bg-transparent py-3 text-sm leading-6 text-white outline-none placeholder:text-[#556987]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void sendMessage()}
-                        disabled={(!input.trim() && attachments.length === 0) || isLoading}
-                        className="rounded-xl bg-blue-600 p-3 text-white shadow-[0_0_22px_rgba(19,91,236,0.4)] transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-45"
-                        aria-label="Send message"
-                      >
-                        <Send size={19} />
-                      </button>
+                      {longBreakDue ? (
+                        <div className="mb-4 rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-100">
+                          Four focus sessions completed. Take the long break before the next sprint.
+                        </div>
+                      ) : null}
+
+                      <div className="grid grid-cols-2 gap-2">
+                        {pomodoro.isRunning ? (
+                          <button
+                            type="button"
+                            onClick={pauseTimer}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#232f48] bg-[#111722] px-3 py-3 text-sm font-semibold text-[#c5d3ef] transition hover:text-white"
+                          >
+                            <Pause size={17} />
+                            Pause
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={startTimer}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-semibold text-white shadow-[0_0_22px_rgba(19,91,236,0.35)] transition hover:bg-blue-500"
+                          >
+                            <Play size={17} />
+                            {pomodoro.remainingSeconds === getDurationForMode(pomodoro.mode)
+                              ? "Start"
+                              : "Resume"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={resetTimer}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#232f48] bg-[#111722] px-3 py-3 text-sm font-semibold text-[#c5d3ef] transition hover:text-white"
+                        >
+                          <RotateCcw size={17} />
+                          Reset
+                        </button>
+                        <button
+                          type="button"
+                          onClick={completeFocusSession}
+                          disabled={pomodoro.mode !== "focus"}
+                          className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          <TimerReset size={17} />
+                          Finish Session
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-[#232f48] bg-[#111722] p-8 text-center">
+                      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-300">
+                        <Target size={26} />
+                      </div>
+                      <h3 className="text-lg font-semibold text-white">Select a task to start focusing.</h3>
+                      <p className="mt-2 text-sm leading-6 text-[#92a4c9]">
+                        Add a task or choose one from the active list, then start the timer.
+                      </p>
                     </div>
-                  </div>
-                </div>
-              </section>
-            ) : (
-              <MindMapCanvas
-                topic={activeTopic}
-                tasks={tasks}
-                generated={mindMapGenerated}
-                onGenerate={generateMindMap}
-              />
-            )}
+                  )}
+                </section>
+              </aside>
+            </div>
           </div>
         </main>
-
-        <AnimatePresence initial={false}>
-          {knowledgeRailOpen ? (
-            <motion.aside
-              key="knowledge-rail"
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 336, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="hidden h-full shrink-0 overflow-hidden border-l border-[#232f48] bg-[#111722]/95 shadow-2xl shadow-black/20 backdrop-blur xl:flex xl:flex-col"
-            >
-              <div className="flex items-center justify-between border-b border-[#232f48] p-5">
-                <h2 className="inline-flex items-center gap-2 font-semibold text-white">
-                  <Sparkles size={18} className="text-blue-300" />
-                  Knowledge Rail
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setKnowledgeRailOpen(false)}
-                  className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white"
-                  aria-label="Close knowledge rail"
-                >
-                  <PanelRightClose size={18} />
-                </button>
-              </div>
-
-              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
-                <section>
-                  <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-[#556987]">
-                    Key Takeaways
-                  </h3>
-                  <div className="space-y-3">
-                    {takeaways.map((takeaway) => (
-                      <div key={takeaway.id} className="flex gap-3 rounded-xl border border-[#232f48] bg-[#1a2332] p-3">
-                        <Lightbulb size={16} className="mt-0.5 shrink-0 text-blue-300" />
-                        <p className="text-sm leading-5 text-[#c5d3ef]">{takeaway.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                <section>
-                  <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-[#556987]">
-                    Generated Flashcards
-                  </h3>
-                  <div className="space-y-3">
-                    {flashcards.map((card) => (
-                      <div key={card.id} className="rounded-xl border border-[#232f48] bg-[#1a2332] p-4">
-                        <div className="mb-2 flex items-center justify-between">
-                          <span className="rounded-full bg-blue-500/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-300">
-                            {card.type}
-                          </span>
-                          <RotateCcw size={14} className="text-[#556987]" />
-                        </div>
-                        <h4 className="text-sm font-semibold text-white">{card.front}</h4>
-                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-[#92a4c9]">{card.back}</p>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                <section>
-                  <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-[#556987]">
-                    Task Breakdown
-                  </h3>
-                  <div className="space-y-2">
-                    {tasks.map((task) => (
-                      <div key={task.id} className="flex items-center gap-3 rounded-xl border border-[#232f48] bg-[#1a2332] p-3">
-                        <span
-                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
-                            task.status === "done"
-                              ? "bg-emerald-400/10 text-emerald-300"
-                              : task.status === "active"
-                                ? "bg-blue-500/10 text-blue-300"
-                                : "bg-[#232f48] text-[#92a4c9]"
-                          }`}
-                        >
-                          {task.status === "done" ? <CheckCircle2 size={16} /> : <Target size={15} />}
-                        </span>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-white">{task.title}</p>
-                          <p className="text-xs capitalize text-[#556987]">{task.status}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              </div>
-
-              <div className="border-t border-[#232f48] p-5">
-                <button
-                  type="button"
-                  onClick={() => setShowReviewModal(true)}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 px-4 py-3 text-sm font-semibold text-white shadow-[0_0_24px_rgba(19,91,236,0.35)] transition hover:from-blue-500 hover:to-blue-400"
-                >
-                  <GraduationCap size={18} />
-                  Review {flashcards.length} Cards
-                </button>
-              </div>
-            </motion.aside>
-          ) : null}
-        </AnimatePresence>
       </div>
 
+      <button
+        type="button"
+        onClick={() => setIsIdeaVaultOpen(true)}
+        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-2xl border border-blue-400/30 bg-blue-600 text-white shadow-[0_0_34px_rgba(19,91,236,0.48)] transition hover:bg-blue-500"
+        aria-label="Open Idea Vault"
+      >
+        <Lightbulb size={23} />
+      </button>
+
       <AnimatePresence>
-        {showReviewModal && currentFlashcard ? (
+        {isIdeaVaultOpen ? (
           <motion.div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={() => setShowReviewModal(false)}
+            onClick={() => setIsIdeaVaultOpen(false)}
           >
             <motion.div
               initial={{ y: 20, scale: 0.96, opacity: 0 }}
               animate={{ y: 0, scale: 1, opacity: 1 }}
               exit={{ y: 20, scale: 0.96, opacity: 0 }}
               onClick={(event) => event.stopPropagation()}
-              className="w-full max-w-lg rounded-2xl border border-[#232f48] bg-[#1a2332] p-6 shadow-2xl"
+              className="max-h-[90vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-[#232f48] bg-[#1a2332] shadow-2xl"
             >
-              <div className="mb-5 flex items-center justify-between">
+              <div className="flex items-start justify-between border-b border-[#232f48] p-5">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-[#92a4c9]">
-                    Card {currentCardIndex + 1} of {flashcards.length}
+                  <h2 className="text-xl font-semibold text-white">Idea Vault</h2>
+                  <p className="mt-1 text-sm text-[#92a4c9]">
+                    Save quick thoughts without breaking your focus.
                   </p>
-                  <div className="mt-2 h-2 w-40 overflow-hidden rounded-full bg-[#111722]">
-                    <div
-                      className="h-2 rounded-full bg-gradient-to-r from-blue-600 to-emerald-400"
-                      style={{ width: `${((currentCardIndex + 1) / flashcards.length) * 100}%` }}
-                    />
-                  </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowReviewModal(false)}
+                  onClick={() => setIsIdeaVaultOpen(false)}
                   className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white"
-                  aria-label="Close review modal"
+                  aria-label="Close Idea Vault"
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              <div className="rounded-2xl border border-[#232f48] bg-[#111722] p-6 text-center">
-                <span className="rounded-full bg-blue-500/10 px-3 py-1 text-xs font-bold uppercase tracking-wider text-blue-300">
-                  {currentFlashcard.type}
-                </span>
-                <h3 className="mt-5 text-2xl font-semibold text-white">{currentFlashcard.front}</h3>
-                <p className="mt-4 text-sm leading-6 text-[#92a4c9]">{currentFlashcard.back}</p>
-              </div>
-
-              <div className="mt-5 grid grid-cols-[1fr_1fr] gap-3">
-                <button
-                  type="button"
-                  onClick={() => setCurrentCardIndex((index) => Math.max(index - 1, 0))}
-                  disabled={currentCardIndex === 0}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#232f48] bg-[#111722] px-4 py-3 text-sm font-semibold text-[#92a4c9] transition hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                  <ChevronLeft size={17} />
-                  Previous
-                </button>
-                {currentCardIndex === flashcards.length - 1 ? (
-                  <button
-                    type="button"
-                    onClick={completeReview}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-[#07130d] transition hover:bg-emerald-400"
-                  >
-                    <CheckCircle2 size={17} />
-                    Complete
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setCurrentCardIndex((index) => Math.min(index + 1, flashcards.length - 1))
+              <div className="max-h-[calc(90vh-5rem)] overflow-y-auto p-5">
+                <form onSubmit={submitIdea} className="rounded-2xl border border-[#232f48] bg-[#111722] p-4">
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+                    <input
+                      value={ideaForm.title}
+                      onChange={(event) =>
+                        setIdeaForm((current) => ({ ...current, title: event.target.value }))
+                      }
+                      placeholder="Idea title"
+                      className="h-11 rounded-xl border border-[#232f48] bg-[#1a2332] px-3 text-sm text-white outline-none placeholder:text-[#556987] focus:border-blue-500/60"
+                    />
+                    <input
+                      value={ideaForm.tag}
+                      onChange={(event) =>
+                        setIdeaForm((current) => ({ ...current, tag: event.target.value }))
+                      }
+                      placeholder="Optional tag"
+                      className="h-11 rounded-xl border border-[#232f48] bg-[#1a2332] px-3 text-sm text-white outline-none placeholder:text-[#556987] focus:border-blue-500/60"
+                    />
+                  </div>
+                  <textarea
+                    value={ideaForm.note}
+                    onChange={(event) =>
+                      setIdeaForm((current) => ({ ...current, note: event.target.value }))
                     }
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+                    placeholder="Write the thought quickly..."
+                    rows={3}
+                    className="mt-3 w-full resize-none rounded-xl border border-[#232f48] bg-[#1a2332] px-3 py-3 text-sm leading-6 text-white outline-none placeholder:text-[#556987] focus:border-blue-500/60"
+                  />
+                  <button
+                    type="submit"
+                    className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
                   >
-                    Next
-                    <ChevronRight size={17} />
+                    <Plus size={16} />
+                    Add Idea
                   </button>
-                )}
+                </form>
+
+                <div className="mt-5 space-y-3">
+                  {ideas.length ? (
+                    ideas.map((idea) => (
+                      <div key={idea.id} className="rounded-2xl border border-[#232f48] bg-[#111722] p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h3 className="font-semibold text-white">{idea.title}</h3>
+                            <p className="mt-2 text-sm leading-6 text-[#92a4c9]">{idea.note}</p>
+                            {idea.tag ? (
+                              <span className="mt-3 inline-flex rounded-full border border-blue-400/30 bg-blue-500/10 px-2 py-1 text-xs font-semibold text-blue-200">
+                                {idea.tag}
+                              </span>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setIdeas((currentIdeas) =>
+                                currentIdeas.filter((item) => item.id !== idea.id),
+                              )
+                            }
+                            className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-red-500/10 hover:text-red-300"
+                            aria-label={`Delete ${idea.title}`}
+                          >
+                            <Trash2 size={17} />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-[#232f48] p-6 text-center text-sm text-[#92a4c9]">
+                      No ideas saved yet.
+                    </div>
+                  )}
+                </div>
               </div>
             </motion.div>
           </motion.div>
         ) : null}
       </AnimatePresence>
     </div>
+  );
+}
+
+function TaskSection({
+  title,
+  subtitle,
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  onEditTask,
+  onDeleteTask,
+  onMarkDone,
+  emptyText = "No active tasks yet.",
+}: {
+  title: string;
+  subtitle: string;
+  tasks: StudyTask[];
+  selectedTaskId: string | null;
+  onSelectTask: (taskId: string) => void;
+  onEditTask: (task: StudyTask) => void;
+  onDeleteTask: (taskId: string) => void;
+  onMarkDone: (taskId: string) => void;
+  emptyText?: string;
+}) {
+  return (
+    <section className="rounded-2xl border border-[#232f48] bg-[#1a2332]/95 p-4 shadow-2xl shadow-black/15 backdrop-blur sm:p-5">
+      <div className="mb-4">
+        <h2 className="text-base font-semibold text-white">{title}</h2>
+        <p className="text-sm text-[#92a4c9]">{subtitle}</p>
+      </div>
+      <div className="space-y-3">
+        {tasks.length ? (
+          tasks.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              isSelected={task.id === selectedTaskId}
+              onSelect={() => onSelectTask(task.id)}
+              onEdit={() => onEditTask(task)}
+              onDelete={() => onDeleteTask(task.id)}
+              onMarkDone={() => onMarkDone(task.id)}
+            />
+          ))
+        ) : (
+          <div className="rounded-2xl border border-dashed border-[#232f48] bg-[#111722] p-6 text-center text-sm text-[#92a4c9]">
+            {emptyText}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function TaskCard({
+  task,
+  isSelected,
+  onSelect,
+  onEdit,
+  onDelete,
+  onMarkDone,
+}: {
+  task: StudyTask;
+  isSelected: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onMarkDone: () => void;
+}) {
+  const progress = Math.min(
+    100,
+    Math.round((task.completedPomodoros / Math.max(task.estimatedPomodoros, 1)) * 100),
+  );
+
+  return (
+    <article
+      className={`rounded-2xl border p-4 transition ${
+        isSelected
+          ? "border-blue-500/60 bg-blue-600/10 shadow-[0_0_28px_rgba(19,91,236,0.22)]"
+          : "border-[#232f48] bg-[#111722] hover:border-blue-500/30"
+      }`}
+    >
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <button type="button" onClick={onSelect} className="min-w-0 flex-1 text-left">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[#92a4c9]">
+              {task.status === "done" ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+            </span>
+            <h3 className="font-semibold text-white">{task.title}</h3>
+            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${priorityStyles(task.priority)}`}>
+              {task.priority}
+            </span>
+            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusStyles(task.status)}`}>
+              {task.status}
+            </span>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-[#92a4c9]">
+            {task.description || "No description added."}
+          </p>
+        </button>
+
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onSelect}
+            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-500"
+          >
+            <Play size={14} />
+            Start Focus
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="rounded-xl border border-[#232f48] p-2 text-[#92a4c9] transition hover:text-white"
+            aria-label={`Edit ${task.title}`}
+          >
+            <Edit3 size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="rounded-xl border border-[#232f48] p-2 text-[#92a4c9] transition hover:border-red-400/30 hover:bg-red-500/10 hover:text-red-300"
+            aria-label={`Delete ${task.title}`}
+          >
+            <Trash2 size={15} />
+          </button>
+          {task.status !== "done" ? (
+            <button
+              type="button"
+              onClick={onMarkDone}
+              className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-2 text-emerald-200 transition hover:bg-emerald-400/15"
+              aria-label={`Mark ${task.title} done`}
+            >
+              <CheckCircle2 size={15} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+        <div>
+          <div className="mb-2 flex items-center justify-between text-xs text-[#92a4c9]">
+            <span>Progress</span>
+            <span>
+              {task.completedPomodoros}/{task.estimatedPomodoros} Pomodoros
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-[#1a2332]">
+            <div
+              className="h-2 rounded-full bg-gradient-to-r from-blue-600 to-emerald-400"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2 rounded-xl border border-[#232f48] bg-[#1a2332] px-3 py-2 text-xs font-semibold text-[#c5d3ef]">
+          <Clock3 size={14} className="text-blue-300" />
+          Est. {task.estimatedPomodoros}
+        </div>
+      </div>
+    </article>
   );
 }
