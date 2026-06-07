@@ -823,7 +823,7 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
         />
 
         <main className="flex min-w-0 flex-1 flex-col">
-          <header className="shrink-0 border-b border-[#232f48] bg-[#111722]/90 p-3 backdrop-blur sm:p-4">
+          <header className="flex h-[73px] shrink-0 items-center border-b border-[#232f48] bg-[#111722]/90 px-4 backdrop-blur">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-center gap-2">
                 {!sidebarOpen ? (

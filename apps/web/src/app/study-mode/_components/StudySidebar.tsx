@@ -6,13 +6,17 @@ import {
   CheckCircle2,
   Flame,
   ListChecks,
+  LogOut,
   Sparkles,
   Target,
+  UserRound,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { ModeToggle } from "@/components/mode-toggle";
+import { authClient } from "@/lib/auth-client";
 import type { ProductivityStats } from "./types";
 
 const primaryItems = [
@@ -46,6 +50,11 @@ export function StudySidebar({
   longBreakDue: boolean;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { data: session } = authClient.useSession();
+  const userLabel = session?.user.name || session?.user.email || "Account";
+  const userSubLabel =
+    session?.user.name && session.user.email ? session.user.email : "Signed in";
 
   return (
     <AnimatePresence initial={false}>
@@ -58,8 +67,8 @@ export function StudySidebar({
           transition={{ duration: 0.2 }}
           className="hidden h-full shrink-0 overflow-hidden border-r border-[#232f48] bg-[#111722]/95 shadow-2xl shadow-black/20 backdrop-blur md:flex md:flex-col"
         >
-          <div className="border-b border-[#232f48] p-4">
-            <div className="flex items-center justify-between">
+          <div className="flex h-[73px] items-center border-b border-[#232f48] px-4">
+            <div className="flex w-full items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600/15 text-blue-300 shadow-[0_0_24px_rgba(19,91,236,0.28)]">
                   <Sparkles size={20} />
@@ -122,7 +131,7 @@ export function StudySidebar({
             })}
           </nav>
 
-          <div className="space-y-3 p-4">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 [scrollbar-color:#33415f_#111722] [scrollbar-width:thin]">
             <div className="rounded-2xl border border-[#232f48] bg-[#1a2332] p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
                 Today Stats
@@ -154,6 +163,40 @@ export function StudySidebar({
                     {longBreakDue ? "Long break is due" : "Work in 25 minute sprints"}
                   </p>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-[#232f48] p-3">
+            <div className="rounded-2xl border border-[#232f48] bg-[#1a2332]/80 p-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#111722] text-[#92a4c9]">
+                  <UserRound size={17} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-white">{userLabel}</p>
+                  <p className="truncate text-xs text-[#556987]">{userSubLabel}</p>
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#232f48] pt-3">
+                <ModeToggle />
+                <button
+                  type="button"
+                  onClick={() => {
+                    authClient.signOut({
+                      fetchOptions: {
+                        onSuccess: () => {
+                          router.push("/login");
+                        },
+                      },
+                    });
+                  }}
+                  className="flex h-9 items-center gap-2 rounded-xl border border-[#33415f] bg-[#111722] px-3 text-sm font-semibold text-[#c5d3ef] transition hover:bg-red-500/10 hover:text-red-200"
+                >
+                  <LogOut size={15} />
+                  Logout
+                </button>
               </div>
             </div>
           </div>
