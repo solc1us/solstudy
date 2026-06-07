@@ -3,6 +3,8 @@ import type { PomodoroMode, StudyTask, TaskPriority, TaskStatus } from "./types"
 export const TASKS_KEY = "solstudy-tasks";
 export const SELECTED_TASK_KEY = "solstudy-selected-task-id";
 export const POMODORO_KEY = "solstudy-pomodoro-state";
+export const ALARM_SETTINGS_KEY = "solstudy-alarm-settings";
+export const POMODORO_PANEL_COLLAPSED_KEY = "solstudy-pomodoro-panel-collapsed";
 export const IDEAS_KEY = "solstudy-ideas";
 export const STATS_KEY = "solstudy-productivity-stats";
 

@@ -8,21 +8,23 @@ import {
   Menu,
   Sparkles,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/utils/trpc";
 import { CategoryManagementModal } from "./CategoryManagementModal";
 import { ConfirmModal } from "./ConfirmModal";
 import { CreateTaskForm } from "./CreateTaskForm";
+import { CustomSelect } from "./CustomSelect";
 import { EditTaskModal } from "./EditTaskModal";
 import { IdeaVaultModal } from "./IdeaVaultModal";
 import { PomodoroPanel } from "./PomodoroPanel";
 import { StudySidebar } from "./StudySidebar";
 import { TaskList } from "./TaskList";
 import {
-  FOCUS_SECONDS,
+  ALARM_SETTINGS_KEY,
   POMODORO_KEY,
+  POMODORO_PANEL_COLLAPSED_KEY,
   SELECTED_TASK_KEY,
   emptyIdeaForm,
   emptyTaskForm,
@@ -30,6 +32,7 @@ import {
   readLocalStorage,
 } from "./storage";
 import type {
+  AlarmSettings,
   DeleteConfirmationState,
   IdeaVaultItem,
   PomodoroMode,
@@ -40,6 +43,17 @@ import type {
   StudyTask,
   TaskFormState,
 } from "./types";
+
+type ActiveTaskSortMode = "priority" | "category";
+type SessionFinishReason = "manual" | "natural";
+
+const DEFAULT_ALARM_SETTINGS: AlarmSettings = {
+  enabled: true,
+  volume: 0.8,
+};
+
+const FOCUS_COMPLETE_SOUND_PATH = "/sounds/focus-complete.mp3";
+const BREAK_COMPLETE_SOUND_PATH = "/sounds/break-complete.mp3";
 
 const routeMeta: Record<
   StudyRoute,
@@ -114,6 +128,75 @@ function parseEstimatedMinutes(value: string) {
   return Math.round(parsed);
 }
 
+function clampSeconds(value: number, max: number) {
+  return Math.min(Math.max(0, value), max);
+}
+
+function createIdlePomodoro(
+  mode: PomodoroMode,
+  selectedTaskId: string | null,
+  completedFocusSessions: number,
+): PomodoroState {
+  const plannedSeconds = getDurationForMode(mode);
+
+  return {
+    mode,
+    plannedSeconds,
+    startedAt: null,
+    targetEndAt: null,
+    pausedRemainingSeconds: plannedSeconds,
+    remainingSeconds: plannedSeconds,
+    isRunning: false,
+    selectedTaskId,
+    completedFocusSessions,
+  };
+}
+
+function getRemainingSeconds(state: PomodoroState, now = Date.now()) {
+  if (state.isRunning && state.targetEndAt) {
+    return clampSeconds(Math.ceil((state.targetEndAt - now) / 1000), state.plannedSeconds);
+  }
+
+  return clampSeconds(state.pausedRemainingSeconds, state.plannedSeconds);
+}
+
+function normalizePomodoroState(state: Partial<PomodoroState>, selectedTaskId: string | null) {
+  const mode = state.mode ?? "focus";
+  const plannedSeconds = state.plannedSeconds ?? getDurationForMode(mode);
+  const remainingSeconds = clampSeconds(
+    state.pausedRemainingSeconds ?? state.remainingSeconds ?? plannedSeconds,
+    plannedSeconds,
+  );
+
+  return {
+    mode,
+    plannedSeconds,
+    startedAt: typeof state.startedAt === "number" ? state.startedAt : null,
+    targetEndAt: null,
+    pausedRemainingSeconds: remainingSeconds,
+    remainingSeconds,
+    isRunning: false,
+    selectedTaskId,
+    completedFocusSessions: state.completedFocusSessions ?? 0,
+  };
+}
+
+function normalizeAlarmSettings(settings: Partial<AlarmSettings>) {
+  return {
+    enabled: settings.enabled ?? DEFAULT_ALARM_SETTINGS.enabled,
+    volume:
+      typeof settings.volume === "number"
+        ? Math.min(Math.max(settings.volume, 0), 1)
+        : DEFAULT_ALARM_SETTINGS.volume,
+  };
+}
+
+const priorityRank: Record<StudyTask["priority"], number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+};
+
 function toFocusSessionMode(mode: PomodoroMode): FocusSessionMode {
   if (mode === "short-break") return "short_break";
   if (mode === "long-break") return "long_break";
@@ -128,14 +211,15 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
   const queryClient = useQueryClient();
   const [hasLoaded, setHasLoaded] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeTaskSortMode, setActiveTaskSortMode] =
+    useState<ActiveTaskSortMode>("priority");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [pomodoro, setPomodoro] = useState<PomodoroState>({
-    mode: "focus",
-    remainingSeconds: FOCUS_SECONDS,
-    isRunning: false,
-    selectedTaskId: null,
-    completedFocusSessions: 0,
-  });
+  const [pomodoro, setPomodoro] = useState<PomodoroState>(() =>
+    createIdlePomodoro("focus", null, 0),
+  );
+  const [alarmSettings, setAlarmSettings] = useState<AlarmSettings>(DEFAULT_ALARM_SETTINGS);
+  const [isPomodoroPanelCollapsed, setIsPomodoroPanelCollapsed] = useState(false);
+  const [isCreateTaskFormExpanded, setIsCreateTaskFormExpanded] = useState(false);
   const [taskForm, setTaskForm] = useState<TaskFormState>(emptyTaskForm);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editTaskForm, setEditTaskForm] = useState<TaskFormState>(emptyTaskForm);
@@ -144,6 +228,12 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [ideaForm, setIdeaForm] = useState(emptyIdeaForm);
   const [editingIdeaId, setEditingIdeaId] = useState<string | null>(null);
+  const pomodoroRef = useRef(pomodoro);
+  const alarmSettingsRef = useRef(alarmSettings);
+  const focusCompleteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const breakCompleteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUnlockedRef = useRef(false);
+  const completionInFlightRef = useRef(false);
 
   const tasksQuery = useQuery(trpc.tasks.list.queryOptions(undefined, { retry: false }));
   const categoriesQuery = useQuery(trpc.categories.list.queryOptions(undefined, { retry: false }));
@@ -265,22 +355,39 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
   );
 
   useEffect(() => {
+    pomodoroRef.current = pomodoro;
+  }, [pomodoro]);
+
+  useEffect(() => {
+    alarmSettingsRef.current = alarmSettings;
+    if (focusCompleteAudioRef.current) {
+      focusCompleteAudioRef.current.volume = alarmSettings.volume;
+    }
+    if (breakCompleteAudioRef.current) {
+      breakCompleteAudioRef.current.volume = alarmSettings.volume;
+    }
+  }, [alarmSettings]);
+
+  useEffect(() => {
     const loadedSelectedTaskId = readLocalStorage<string | null>(SELECTED_TASK_KEY, null);
-    const loadedPomodoro = readLocalStorage<PomodoroState>(POMODORO_KEY, {
-      mode: "focus",
-      remainingSeconds: FOCUS_SECONDS,
-      isRunning: false,
-      selectedTaskId: loadedSelectedTaskId,
-      completedFocusSessions: 0,
-    });
+    const loadedPomodoro = readLocalStorage<Partial<PomodoroState>>(
+      POMODORO_KEY,
+      createIdlePomodoro("focus", loadedSelectedTaskId, 0),
+    );
+    const loadedAlarmSettings = readLocalStorage<Partial<AlarmSettings>>(
+      ALARM_SETTINGS_KEY,
+      DEFAULT_ALARM_SETTINGS,
+    );
+    const loadedPomodoroPanelCollapsed = readLocalStorage<boolean>(
+      POMODORO_PANEL_COLLAPSED_KEY,
+      false,
+    );
 
     // TODO: Add an explicit import flow for legacy solstudy-tasks/solstudy-ideas data.
     setSelectedTaskId(loadedSelectedTaskId);
-    setPomodoro({
-      ...loadedPomodoro,
-      selectedTaskId: loadedSelectedTaskId,
-      isRunning: false,
-    });
+    setPomodoro(normalizePomodoroState(loadedPomodoro, loadedSelectedTaskId));
+    setAlarmSettings(normalizeAlarmSettings(loadedAlarmSettings));
+    setIsPomodoroPanelCollapsed(loadedPomodoroPanelCollapsed);
     setHasLoaded(true);
   }, []);
 
@@ -294,16 +401,53 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     window.localStorage.setItem(POMODORO_KEY, JSON.stringify(pomodoro));
   }, [hasLoaded, pomodoro]);
 
+  useEffect(() => {
+    if (!hasLoaded) return;
+    window.localStorage.setItem(ALARM_SETTINGS_KEY, JSON.stringify(alarmSettings));
+  }, [alarmSettings, hasLoaded]);
+
+  useEffect(() => {
+    if (!hasLoaded) return;
+    window.localStorage.setItem(
+      POMODORO_PANEL_COLLAPSED_KEY,
+      JSON.stringify(isPomodoroPanelCollapsed),
+    );
+  }, [hasLoaded, isPomodoroPanelCollapsed]);
+
   const tasks = useMemo<StudyTask[]>(() => tasksQuery.data ?? [], [tasksQuery.data]);
   const categories = useMemo<StudyCategory[]>(() => categoriesQuery.data ?? [], [categoriesQuery.data]);
   const ideas = useMemo<IdeaVaultItem[]>(() => ideasQuery.data ?? [], [ideasQuery.data]);
+  const categoryNameById = useMemo(
+    () => new Map(categories.map((category) => [category.id, category.name.toLowerCase()])),
+    [categories],
+  );
 
   const activeTasks = useMemo(
-    () =>
-      tasks
-        .filter((task) => task.status !== "done")
-        .sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt)),
-    [tasks],
+    () => {
+      const sortableTasks = tasks.filter((task) => task.status !== "done");
+
+      return sortableTasks.sort((a, b) => {
+        if (a.id === selectedTaskId) return -1;
+        if (b.id === selectedTaskId) return 1;
+
+        if (activeTaskSortMode === "category") {
+          const aCategory = a.categoryId ? categoryNameById.get(a.categoryId) : null;
+          const bCategory = b.categoryId ? categoryNameById.get(b.categoryId) : null;
+
+          if (aCategory && !bCategory) return -1;
+          if (!aCategory && bCategory) return 1;
+          if (aCategory && bCategory && aCategory !== bCategory) {
+            return aCategory.localeCompare(bCategory);
+          }
+        }
+
+        const priorityDelta = priorityRank[a.priority] - priorityRank[b.priority];
+        if (priorityDelta !== 0) return priorityDelta;
+
+        return toTime(b.updatedAt) - toTime(a.updatedAt);
+      });
+    },
+    [activeTaskSortMode, categoryNameById, selectedTaskId, tasks],
   );
   const completedTasks = useMemo(
     () =>
@@ -325,7 +469,7 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     [completedTasks.length, pomodoro.completedFocusSessions, tasks.length],
   );
   const timerProgress =
-    1 - pomodoro.remainingSeconds / Math.max(getDurationForMode(pomodoro.mode), 1);
+    1 - pomodoro.remainingSeconds / Math.max(pomodoro.plannedSeconds, 1);
   const longBreakDue =
     pomodoro.completedFocusSessions > 0 && pomodoro.completedFocusSessions % 4 === 0;
   const isLoadingData = tasksQuery.isPending || categoriesQuery.isPending || ideasQuery.isPending;
@@ -343,103 +487,201 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
 
     const fallbackId = activeTasks[0]?.id ?? null;
     setSelectedTaskId(fallbackId);
-    setPomodoro((current) => ({
-      ...current,
-      selectedTaskId: fallbackId,
-      isRunning: fallbackId ? current.isRunning : false,
-    }));
+    setPomodoro((current) =>
+      createIdlePomodoro(current.mode, fallbackId, current.completedFocusSessions),
+    );
   }, [activeTasks, hasLoaded, selectedTaskId, tasks, tasksQuery.isPending]);
 
-  const finishCurrentSession = useCallback(async () => {
-    if (completeFocusSessionMutation.isPending) return;
+  const ensureAlarmAudio = useCallback(() => {
+    if (typeof window === "undefined") return null;
 
-    const activeMode = pomodoro.mode;
-    const taskId = selectedTaskId;
-    const durationSeconds = getDurationForMode(activeMode);
-
-    if (!taskId) {
-      setPomodoro((current) => ({
-        ...current,
-        isRunning: false,
-        remainingSeconds: durationSeconds,
-      }));
-      return;
+    if (!focusCompleteAudioRef.current) {
+      focusCompleteAudioRef.current = new Audio(FOCUS_COMPLETE_SOUND_PATH);
+      focusCompleteAudioRef.current.preload = "auto";
+    }
+    if (!breakCompleteAudioRef.current) {
+      breakCompleteAudioRef.current = new Audio(BREAK_COMPLETE_SOUND_PATH);
+      breakCompleteAudioRef.current.preload = "auto";
     }
 
-    const elapsedSeconds = Math.max(0, durationSeconds - pomodoro.remainingSeconds);
-    const plannedMinutes = Math.round(durationSeconds / 60);
-    const actualMinutes =
-      pomodoro.remainingSeconds <= 0
-        ? plannedMinutes
-        : Math.max(1, Math.round(elapsedSeconds / 60));
+    focusCompleteAudioRef.current.volume = alarmSettingsRef.current.volume;
+    breakCompleteAudioRef.current.volume = alarmSettingsRef.current.volume;
 
-    try {
-      await completeFocusSessionMutation.mutateAsync({
-        taskId,
-        mode: toFocusSessionMode(activeMode),
-        plannedMinutes,
-        actualMinutes,
-        startedAt: new Date(Date.now() - elapsedSeconds * 1000),
-        endedAt: new Date(),
+    return {
+      focus: focusCompleteAudioRef.current,
+      break: breakCompleteAudioRef.current,
+    };
+  }, []);
+
+  const prepareAlarmAudio = useCallback(() => {
+    const audio = ensureAlarmAudio();
+    if (!audio || audioUnlockedRef.current) return;
+
+    audioUnlockedRef.current = true;
+    for (const element of [audio.focus, audio.break]) {
+      element.muted = true;
+      const playPromise = element.play();
+      if (playPromise) {
+        void playPromise
+          .then(() => {
+            element.pause();
+            element.currentTime = 0;
+            element.muted = false;
+          })
+          .catch(() => {
+            element.muted = false;
+          });
+      } else {
+        element.muted = false;
+      }
+    }
+  }, [ensureAlarmAudio]);
+
+  const playAlarm = useCallback(
+    (mode: PomodoroMode) => {
+      if (!alarmSettingsRef.current.enabled) return;
+
+      const audio = ensureAlarmAudio();
+      const element = mode === "focus" ? audio?.focus : audio?.break;
+      if (!element) return;
+
+      element.volume = alarmSettingsRef.current.volume;
+      element.pause();
+      element.currentTime = 0;
+      void element.play().catch(() => undefined);
+    },
+    [ensureAlarmAudio],
+  );
+
+  const completeCurrentSession = useCallback(
+    async (
+      reason: SessionFinishReason,
+      snapshot = pomodoroRef.current,
+      guardClaimed = false,
+    ) => {
+      if (!guardClaimed) {
+        if (completionInFlightRef.current || completeFocusSessionMutation.isPending) return;
+        completionInFlightRef.current = true;
+      }
+
+      const activeMode = snapshot.mode;
+      const taskId = snapshot.selectedTaskId;
+      const plannedSeconds = snapshot.plannedSeconds || getDurationForMode(activeMode);
+
+      if (!taskId) {
+        setPomodoro(createIdlePomodoro(activeMode, null, snapshot.completedFocusSessions));
+        completionInFlightRef.current = false;
+        return;
+      }
+
+      const remainingSeconds =
+        reason === "natural" ? 0 : getRemainingSeconds(snapshot, Date.now());
+      const elapsedSeconds =
+        reason === "natural"
+          ? plannedSeconds
+          : clampSeconds(plannedSeconds - remainingSeconds, plannedSeconds);
+      const plannedMinutes = Math.round(plannedSeconds / 60);
+      const actualMinutes =
+        reason === "natural"
+          ? plannedMinutes
+          : Math.min(plannedMinutes, Math.max(1, Math.round(elapsedSeconds / 60)));
+      const endedAtMs =
+        reason === "natural"
+          ? snapshot.targetEndAt ?? Date.now()
+          : Date.now();
+      const startedAtMs =
+        snapshot.startedAt ?? Math.max(0, endedAtMs - elapsedSeconds * 1000);
+
+      if (reason === "natural") {
+        playAlarm(activeMode);
+      }
+
+      try {
+        await completeFocusSessionMutation.mutateAsync({
+          taskId,
+          mode: toFocusSessionMode(activeMode),
+          plannedMinutes,
+          actualMinutes,
+          startedAt: new Date(startedAtMs),
+          endedAt: new Date(endedAtMs),
+        });
+      } catch {
+        completionInFlightRef.current = false;
+        return;
+      }
+
+      setPomodoro((current) => {
+        if (activeMode !== "focus") {
+          return createIdlePomodoro("focus", taskId, current.completedFocusSessions);
+        }
+
+        const completedFocusSessions = current.completedFocusSessions + 1;
+        const nextMode: PomodoroMode =
+          completedFocusSessions % 4 === 0 ? "long-break" : "short-break";
+
+        return createIdlePomodoro(nextMode, taskId, completedFocusSessions);
       });
-    } catch {
-      return;
-    }
+      completionInFlightRef.current = false;
+    },
+    [completeFocusSessionMutation, playAlarm],
+  );
 
-    if (activeMode !== "focus") {
-      setPomodoro((current) => ({
-        ...current,
-        mode: "focus",
-        isRunning: false,
-        remainingSeconds: FOCUS_SECONDS,
-      }));
-      return;
-    }
-
+  const syncRunningTimer = useCallback(() => {
     setPomodoro((current) => {
-      const completedFocusSessions = current.completedFocusSessions + 1;
-      const nextMode: PomodoroMode =
-        completedFocusSessions % 4 === 0 ? "long-break" : "short-break";
+      if (!current.isRunning) return current;
+
+      const remainingSeconds = getRemainingSeconds(current, Date.now());
+      if (remainingSeconds <= 0) {
+        const completedSnapshot = {
+          ...current,
+          isRunning: false,
+          remainingSeconds: 0,
+          pausedRemainingSeconds: 0,
+        };
+
+        if (!completionInFlightRef.current) {
+          completionInFlightRef.current = true;
+          window.setTimeout(() => {
+            void completeCurrentSession("natural", completedSnapshot, true);
+          }, 0);
+        }
+
+        return completedSnapshot;
+      }
+
+      if (
+        current.remainingSeconds === remainingSeconds &&
+        current.pausedRemainingSeconds === remainingSeconds
+      ) {
+        return current;
+      }
+
       return {
-        mode: nextMode,
-        remainingSeconds: getDurationForMode(nextMode),
-        isRunning: false,
-        selectedTaskId: taskId,
-        completedFocusSessions,
+        ...current,
+        remainingSeconds,
+        pausedRemainingSeconds: remainingSeconds,
       };
     });
-  }, [
-    completeFocusSessionMutation,
-    pomodoro.mode,
-    pomodoro.remainingSeconds,
-    selectedTaskId,
-  ]);
+  }, [completeCurrentSession]);
 
   useEffect(() => {
     if (!pomodoro.isRunning) return;
 
-    const intervalId = window.setInterval(() => {
-      setPomodoro((current) => {
-        if (!current.isRunning) return current;
-        if (current.remainingSeconds <= 1) {
-          window.setTimeout(() => {
-            void finishCurrentSession();
-          }, 0);
-          return {
-            ...current,
-            remainingSeconds: 0,
-            isRunning: false,
-          };
-        }
-        return {
-          ...current,
-          remainingSeconds: current.remainingSeconds - 1,
-        };
-      });
-    }, 1000);
+    syncRunningTimer();
+    const intervalId = window.setInterval(syncRunningTimer, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [finishCurrentSession, pomodoro.isRunning]);
+  }, [pomodoro.isRunning, syncRunningTimer]);
+
+  useEffect(() => {
+    window.addEventListener("focus", syncRunningTimer);
+    document.addEventListener("visibilitychange", syncRunningTimer);
+
+    return () => {
+      window.removeEventListener("focus", syncRunningTimer);
+      document.removeEventListener("visibilitychange", syncRunningTimer);
+    };
+  }, [syncRunningTimer]);
 
   const selectTask = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
@@ -472,6 +714,7 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
       orderIndex: 0,
     });
     resetTaskForm();
+    setIsCreateTaskFormExpanded(false);
   };
 
   const editTask = (task: StudyTask) => {
@@ -508,11 +751,7 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     await deleteTaskMutation.mutateAsync({ id: taskId });
     if (selectedTaskId === taskId) {
       setSelectedTaskId(null);
-      setPomodoro((current) => ({
-        ...current,
-        selectedTaskId: null,
-        isRunning: false,
-      }));
+      setPomodoro((current) => createIdlePomodoro(current.mode, null, current.completedFocusSessions));
     }
   };
 
@@ -593,10 +832,7 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     await markDoneMutation.mutateAsync({ id: taskId });
     setPomodoro((current) =>
       current.selectedTaskId === taskId
-        ? {
-            ...current,
-            isRunning: false,
-          }
+        ? createIdlePomodoro(current.mode, taskId, current.completedFocusSessions)
         : current,
     );
   };
@@ -607,40 +843,56 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
 
   const startTimer = () => {
     if (!selectedTask) return;
+    prepareAlarmAudio();
     selectTask(selectedTask.id);
 
     if (!selectedTask.startedAt) {
       setStartedMutation.mutate({ id: selectedTask.id });
     }
 
-    setPomodoro((current) => ({
-      ...current,
-      remainingSeconds:
-        current.remainingSeconds <= 0 ? getDurationForMode(current.mode) : current.remainingSeconds,
-      selectedTaskId: selectedTask.id,
-      isRunning: true,
-    }));
+    setPomodoro((current) => {
+      const plannedSeconds = current.plannedSeconds || getDurationForMode(current.mode);
+      const remainingSeconds =
+        getRemainingSeconds(current, Date.now()) || plannedSeconds;
+      const now = Date.now();
+
+      return {
+        ...current,
+        plannedSeconds,
+        startedAt: current.startedAt ?? now,
+        targetEndAt: now + remainingSeconds * 1000,
+        pausedRemainingSeconds: remainingSeconds,
+        remainingSeconds,
+        selectedTaskId: selectedTask.id,
+        isRunning: true,
+      };
+    });
   };
 
   const pauseTimer = () => {
-    setPomodoro((current) => ({ ...current, isRunning: false }));
+    setPomodoro((current) => {
+      const remainingSeconds = getRemainingSeconds(current, Date.now());
+
+      return {
+        ...current,
+        isRunning: false,
+        targetEndAt: null,
+        pausedRemainingSeconds: remainingSeconds,
+        remainingSeconds,
+      };
+    });
   };
 
   const resetTimer = () => {
-    setPomodoro((current) => ({
-      ...current,
-      isRunning: false,
-      remainingSeconds: getDurationForMode(current.mode),
-    }));
+    setPomodoro((current) =>
+      createIdlePomodoro(current.mode, current.selectedTaskId, current.completedFocusSessions),
+    );
   };
 
   const switchMode = (mode: PomodoroMode) => {
-    setPomodoro((current) => ({
-      ...current,
-      mode,
-      isRunning: false,
-      remainingSeconds: getDurationForMode(mode),
-    }));
+    setPomodoro((current) =>
+      createIdlePomodoro(mode, current.selectedTaskId, current.completedFocusSessions),
+    );
   };
 
   const submitIdea = async (event: FormEvent<HTMLFormElement>) => {
@@ -699,6 +951,16 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     },
     categories,
   };
+  const activeTaskSortControl = (
+    <CustomSelect
+      value={activeTaskSortMode}
+      options={[
+        { value: "priority", label: "Sort by Priority" },
+        { value: "category", label: "Sort by Category" },
+      ]}
+      onChange={(value) => setActiveTaskSortMode(value as ActiveTaskSortMode)}
+    />
+  );
 
   const renderDataState = () => {
     if (hasAuthError) {
@@ -752,6 +1014,7 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
             subtitle="Tasks waiting for a focused study slot."
             tasks={activeTasks}
             emptyText="No upcoming tasks yet."
+            headerAction={activeTaskSortControl}
             {...commonTaskListProps}
           />
           <PlaceholderCard
@@ -777,11 +1040,15 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
             categories={categories}
             onManageCategories={() => setIsCategoryModalOpen(true)}
             onSubmit={handleTaskSubmit}
+            isExpanded={isCreateTaskFormExpanded}
+            onExpandedChange={setIsCreateTaskFormExpanded}
+            hasTasks={tasks.length > 0}
           />
           <TaskList
             title="Active Tasks"
             subtitle="Pick the task you want the timer to work on."
             tasks={activeTasks}
+            headerAction={activeTaskSortControl}
             {...commonTaskListProps}
           />
           <TaskList
@@ -803,8 +1070,12 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
           onPause={pauseTimer}
           onReset={resetTimer}
           onFinish={() => {
-            void finishCurrentSession();
+            void completeCurrentSession("manual");
           }}
+          alarmSettings={alarmSettings}
+          onAlarmSettingsChange={setAlarmSettings}
+          isCollapsed={isPomodoroPanelCollapsed}
+          onCollapsedChange={setIsPomodoroPanelCollapsed}
         />
       </div>
     );

@@ -1,6 +1,12 @@
 "use client";
 
-import { CheckCircle2, Clock3, Edit3, Play, RotateCcw, Trash2 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@solstudy/ui/components/dropdown-menu";
+import { CheckCircle2, Clock3, Edit3, MoreHorizontal, RotateCcw, Trash2 } from "lucide-react";
 import { priorityStyles, statusStyles } from "./storage";
 import type { StudyTask } from "./types";
 
@@ -27,7 +33,7 @@ export function TaskCard({
   const estimatedMinutes = task.estimatedMinutes ?? null;
   const progress = Math.min(
     100,
-    estimatedMinutes ? Math.round((task.focusedMinutes / Math.max(estimatedMinutes, 1)) * 100) : 0,
+    estimatedMinutes ? Math.round((totalSpentMinutes / Math.max(estimatedMinutes, 1)) * 100) : 0,
   );
   const displayStatus = isSelected && task.status !== "done" ? "active" : task.status;
   const indicatorClass =
@@ -76,56 +82,67 @@ export function TaskCard({
           </p>
         </button>
 
-        <div className="flex shrink-0 flex-wrap gap-2">
-          {task.status !== "done" ? (
-            <button
-              type="button"
-              onClick={onSelect}
-              className="inline-flex items-center gap-2 rounded-xl border border-blue-400/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-100 transition hover:bg-blue-500/15"
-            >
-              <Play size={14} />
-              Set Active
-            </button>
-          ) : null}
-          {task.status !== "done" ? (
-            <button
-              type="button"
-              onClick={onEdit}
-              className="rounded-xl border border-[#232f48] p-2 text-[#92a4c9] transition hover:text-white"
-              aria-label={`Edit ${task.title}`}
-            >
-              <Edit3 size={15} />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onDelete}
-            className="rounded-xl border border-[#232f48] p-2 text-[#92a4c9] transition hover:border-red-400/30 hover:bg-red-500/10 hover:text-red-300"
-            aria-label={`Delete ${task.title}`}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#232f48] bg-[#1a2332] text-[#92a4c9] transition hover:border-blue-500/30 hover:text-white"
+                aria-label={`Open actions for ${task.title}`}
+              />
+            }
           >
-            <Trash2 size={15} />
-          </button>
-          {task.status !== "done" ? (
-            <button
-              type="button"
-              onClick={onMarkDone}
-              className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-2 text-emerald-200 transition hover:bg-emerald-400/15"
-              aria-label={`Mark ${task.title} done`}
-            >
-              <CheckCircle2 size={15} />
-            </button>
-          ) : null}
-          {task.status === "done" ? (
-            <button
-              type="button"
-              onClick={onRestore}
-              className="rounded-xl border border-blue-400/30 bg-blue-400/10 p-2 text-blue-200 transition hover:bg-blue-400/15"
-              aria-label={`Restore ${task.title}`}
-            >
-              <RotateCcw size={15} />
-            </button>
-          ) : null}
-        </div>
+            <MoreHorizontal size={17} />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            positionerClassName="z-[80]"
+            className="w-44 rounded-xl border border-[#232f48] bg-[#111722] p-1 text-[#c5d3ef] shadow-xl"
+          >
+            {task.status !== "done" ? (
+              <>
+                <DropdownMenuItem
+                  onClick={onEdit}
+                  className="cursor-pointer rounded-lg px-3 py-2 text-sm focus:bg-[#1a2332] focus:text-white"
+                >
+                  <Edit3 size={15} />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={onDelete}
+                  className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-300 focus:bg-red-500/10 focus:text-red-200"
+                >
+                  <Trash2 size={15} />
+                  Delete
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={onMarkDone}
+                  className="cursor-pointer rounded-lg px-3 py-2 text-sm text-emerald-200 focus:bg-emerald-400/10 focus:text-emerald-100"
+                >
+                  <CheckCircle2 size={15} />
+                  Mark Done
+                </DropdownMenuItem>
+              </>
+            ) : (
+              <>
+                <DropdownMenuItem
+                  onClick={onDelete}
+                  className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-300 focus:bg-red-500/10 focus:text-red-200"
+                >
+                  <Trash2 size={15} />
+                  Delete
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={onRestore}
+                  className="cursor-pointer rounded-lg px-3 py-2 text-sm text-blue-200 focus:bg-blue-500/10 focus:text-blue-100"
+                >
+                  <RotateCcw size={15} />
+                  Restore
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
@@ -146,8 +163,7 @@ export function TaskCard({
         </div>
         <div className="flex items-center gap-2 rounded-xl border border-[#232f48] bg-[#1a2332] px-3 py-2 text-xs font-semibold text-[#c5d3ef]">
           <Clock3 size={14} className="text-blue-300" />
-          {estimatedMinutes ? `Est. ${estimatedMinutes}m` : "No estimate"} · {totalSpentMinutes}m
-          spent
+          {estimatedMinutes ? `Est. ${estimatedMinutes}m` : "No estimate"} - {totalSpentMinutes}m spent
         </div>
       </div>
     </article>

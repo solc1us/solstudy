@@ -28,10 +28,19 @@ export interface StudyTask {
 
 export interface PomodoroState {
   mode: PomodoroMode;
+  plannedSeconds: number;
+  startedAt: number | null;
+  targetEndAt: number | null;
+  pausedRemainingSeconds: number;
   remainingSeconds: number;
   isRunning: boolean;
   selectedTaskId: string | null;
   completedFocusSessions: number;
+}
+
+export interface AlarmSettings {
+  enabled: boolean;
+  volume: number;
 }
 
 export interface IdeaVaultItem {

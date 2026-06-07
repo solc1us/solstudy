@@ -33,7 +33,7 @@ export function CustomSelect({
         render={
           <button
             type="button"
-            className="flex h-10 w-full items-center justify-between gap-2 rounded-xl border border-[#232f48] bg-[#111722] px-3 text-left text-sm text-white outline-none transition hover:border-blue-500/40 focus-visible:border-blue-500/60"
+            className="flex h-10 w-full items-center justify-between gap-3 rounded-xl border border-[#232f48] bg-[#111722] py-2 pr-2.5 pl-3 text-left text-sm text-white outline-none transition hover:border-blue-500/40 focus-visible:border-blue-500/60"
           />
         }
       >
@@ -46,10 +46,13 @@ export function CustomSelect({
           ) : null}
           <span className="truncate">{selectedOption?.label ?? placeholder}</span>
         </span>
-        <ChevronDown size={16} className="shrink-0 text-[#92a4c9]" />
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[#92a4c9]">
+          <ChevronDown size={16} />
+        </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
+        positionerClassName="z-[80]"
         className="w-[var(--anchor-width)] rounded-xl border border-[#232f48] bg-[#111722] p-1 text-[#c5d3ef] shadow-xl"
       >
         {options.map((option) => (
