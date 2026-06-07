@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatePresence, motion } from "framer-motion";
 import {
 	Bell,
 	BellOff,
@@ -18,6 +19,8 @@ import type {
 	StudyTask,
 } from "./types";
 
+const panelTransition = { duration: 0.18, ease: "easeOut" } as const;
+
 export function PomodoroPanel({
 	selectedTask,
 	pomodoro,
@@ -32,6 +35,7 @@ export function PomodoroPanel({
 	onAlarmSettingsChange,
 	isCollapsed,
 	onCollapsedChange,
+	isCompletingSession,
 }: {
 	selectedTask: StudyTask | null;
 	pomodoro: PomodoroState;
@@ -46,6 +50,7 @@ export function PomodoroPanel({
 	onAlarmSettingsChange: (settings: AlarmSettings) => void;
 	isCollapsed: boolean;
 	onCollapsedChange: (isCollapsed: boolean) => void;
+	isCompletingSession: boolean;
 }) {
 	return (
 		<aside className="space-y-5">
@@ -69,32 +74,45 @@ export function PomodoroPanel({
 					</button>
 				</div>
 
-				{selectedTask && isCollapsed ? (
-					<div className="rounded-xl border border-[#232f48] bg-[#111722] p-3">
-						<div className="flex items-center justify-between gap-3">
-							<div className="min-w-0">
-								<p className="text-xs font-semibold uppercase tracking-wider text-blue-300">
-									{modeLabel(pomodoro.mode)}
-								</p>
-								<p className="mt-1 truncate text-sm font-semibold text-white">
-									{selectedTask.title}
-								</p>
-							</div>
-							<div className="shrink-0 text-right">
-								<p className="text-2xl font-semibold tracking-tight text-white">
-									{formatTime(pomodoro.remainingSeconds)}
-								</p>
-								<p className="text-xs uppercase tracking-wider text-[#92a4c9]">
-									{pomodoro.isRunning ? "Running" : "Paused"}
-								</p>
-							</div>
-						</div>
-					</div>
-				) : null}
-
-				{selectedTask ? (
-					isCollapsed ? null : (
-					<>
+				<AnimatePresence mode="wait" initial={false}>
+					{selectedTask ? (
+						isCollapsed ? (
+							<motion.div
+								key="pomodoro-collapsed"
+								initial={{ opacity: 0, y: -4 }}
+								animate={{ opacity: 1, y: 0 }}
+								exit={{ opacity: 0, y: -4 }}
+								transition={panelTransition}
+								className="overflow-hidden rounded-xl border border-[#232f48] bg-[#111722] p-3"
+							>
+								<div className="flex items-center justify-between gap-3">
+									<div className="min-w-0">
+										<p className="text-xs font-semibold uppercase tracking-wider text-blue-300">
+											{modeLabel(pomodoro.mode)}
+										</p>
+										<p className="mt-1 truncate text-sm font-semibold text-white">
+											{selectedTask.title}
+										</p>
+									</div>
+									<div className="shrink-0 text-right">
+										<p className="text-2xl font-semibold tracking-tight text-white">
+											{formatTime(pomodoro.remainingSeconds)}
+										</p>
+										<p className="text-xs uppercase tracking-wider text-[#92a4c9]">
+											{pomodoro.isRunning ? "Running" : "Paused"}
+										</p>
+									</div>
+								</div>
+							</motion.div>
+						) : (
+					<motion.div
+						key="pomodoro-expanded"
+						initial={{ opacity: 0, y: -4 }}
+						animate={{ opacity: 1, y: 0 }}
+						exit={{ opacity: 0, y: -4 }}
+						transition={panelTransition}
+						className="overflow-hidden"
+					>
 						<div className="mb-4 rounded-xl border border-[#232f48] bg-[#111722] p-3">
 							<p className="text-xs font-semibold uppercase tracking-wider text-[#556987]">
 								Selected Task
@@ -229,16 +247,28 @@ export function PomodoroPanel({
 							<button
 								type="button"
 								onClick={onFinish}
-								className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/15"
+								disabled={isCompletingSession}
+								className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/15 disabled:cursor-wait disabled:opacity-70"
 							>
-								<TimerReset size={16} />
-								Finish Session
+								{isCompletingSession ? (
+									<span className="h-4 w-4 rounded-full border-2 border-emerald-200/35 border-t-emerald-100 animate-spin" />
+								) : (
+									<TimerReset size={16} />
+								)}
+								{isCompletingSession ? "Completing..." : "Finish Session"}
 							</button>
 						</div>
-					</>
-					)
+					</motion.div>
+						)
 				) : (
-					<div className="rounded-2xl border border-dashed border-[#232f48] bg-[#111722] p-8 text-center">
+					<motion.div
+						key="pomodoro-empty"
+						initial={{ opacity: 0, y: -4 }}
+						animate={{ opacity: 1, y: 0 }}
+						exit={{ opacity: 0, y: -4 }}
+						transition={panelTransition}
+						className="overflow-hidden rounded-2xl border border-dashed border-[#232f48] bg-[#111722] p-8 text-center"
+					>
 						<div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-300">
 							<Target size={26} />
 						</div>
@@ -249,8 +279,9 @@ export function PomodoroPanel({
 							Add a task or choose one from the active list, then start the
 							timer.
 						</p>
-					</div>
+					</motion.div>
 				)}
+				</AnimatePresence>
 			</section>
 		</aside>
 	);

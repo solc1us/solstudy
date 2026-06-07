@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { LoaderCircle, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { CustomSelect } from "./CustomSelect";
@@ -16,6 +16,7 @@ export function EditTaskModal({
   onManageCategories,
   onClose,
   onSubmit,
+  isSaving,
 }: {
   isOpen: boolean;
   editTaskForm: TaskFormState;
@@ -24,6 +25,7 @@ export function EditTaskModal({
   onManageCategories: () => void;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  isSaving: boolean;
 }) {
   const priorityOptions = [
     { value: "low", label: "Low" },
@@ -47,7 +49,9 @@ export function EditTaskModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={onClose}
+          onClick={() => {
+            if (!isSaving) onClose();
+          }}
         >
           <motion.form
             onSubmit={onSubmit}
@@ -67,6 +71,7 @@ export function EditTaskModal({
               <button
                 type="button"
                 onClick={onClose}
+                disabled={isSaving}
                 className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white"
                 aria-label="Close edit task modal"
               >
@@ -194,15 +199,18 @@ export function EditTaskModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-xl border border-[#232f48] px-4 py-2.5 text-sm font-semibold text-[#92a4c9] transition hover:text-white"
+                disabled={isSaving}
+                className="rounded-xl border border-[#232f48] px-4 py-2.5 text-sm font-semibold text-[#92a4c9] transition hover:text-white disabled:cursor-wait disabled:opacity-60"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_0_18px_rgba(19,91,236,0.28)] transition hover:bg-blue-500"
+                disabled={isSaving}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_0_18px_rgba(19,91,236,0.28)] transition hover:bg-blue-500 disabled:cursor-wait disabled:opacity-70"
               >
-                Save Changes
+                {isSaving ? <LoaderCircle size={16} className="animate-spin" /> : null}
+                {isSaving ? "Saving..." : "Save Changes"}
               </button>
             </div>
           </motion.form>

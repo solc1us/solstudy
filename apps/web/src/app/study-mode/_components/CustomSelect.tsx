@@ -6,6 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@solstudy/ui/components/dropdown-menu";
+import { motion } from "framer-motion";
 import { Check, ChevronDown } from "lucide-react";
 
 export type CustomSelectOption = {
@@ -53,26 +54,32 @@ export function CustomSelect({
       <DropdownMenuContent
         align="start"
         positionerClassName="z-[80]"
-        className="w-[var(--anchor-width)] rounded-xl border border-[#232f48] bg-[#111722] p-1 text-[#c5d3ef] shadow-xl"
+        className="w-[var(--anchor-width)] rounded-xl border border-[#232f48] bg-[#111722] p-1 text-[#c5d3ef] shadow-xl duration-150"
       >
-        {options.map((option) => (
-          <DropdownMenuItem
-            key={option.value}
-            onClick={() => onChange(option.value)}
-            className="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm focus:bg-[#1a2332] focus:text-white"
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              {option.color ? (
-                <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: option.color }}
-                />
-              ) : null}
-              <span className="truncate">{option.label}</span>
-            </span>
-            {option.value === value ? <Check size={15} className="text-blue-300" /> : null}
-          </DropdownMenuItem>
-        ))}
+        <motion.div
+          initial={{ opacity: 0, y: -3, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.15, ease: "easeOut" }}
+        >
+          {options.map((option) => (
+            <DropdownMenuItem
+              key={option.value}
+              onClick={() => onChange(option.value)}
+              className="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm focus:bg-[#1a2332] focus:text-white"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                {option.color ? (
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: option.color }}
+                  />
+                ) : null}
+                <span className="truncate">{option.label}</span>
+              </span>
+              {option.value === value ? <Check size={15} className="text-blue-300" /> : null}
+            </DropdownMenuItem>
+          ))}
+        </motion.div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

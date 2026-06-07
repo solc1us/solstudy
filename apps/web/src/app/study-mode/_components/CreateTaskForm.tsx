@@ -1,11 +1,13 @@
 "use client";
 
+import { AnimatePresence, motion } from "framer-motion";
 import { ChevronUp, Plus } from "lucide-react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { CustomSelect } from "./CustomSelect";
 import type { StudyCategory, TaskFormState, TaskPriority } from "./types";
 
 const estimatePresets = [15, 25, 45, 60, 90];
+const panelTransition = { duration: 0.18, ease: "easeOut" } as const;
 
 export function CreateTaskForm({
 	taskForm,
@@ -16,6 +18,7 @@ export function CreateTaskForm({
 	isExpanded,
 	onExpandedChange,
 	hasTasks,
+	isSubmitting,
 }: {
 	taskForm: TaskFormState;
 	setTaskForm: Dispatch<SetStateAction<TaskFormState>>;
@@ -25,6 +28,7 @@ export function CreateTaskForm({
 	isExpanded: boolean;
 	onExpandedChange: (isExpanded: boolean) => void;
 	hasTasks: boolean;
+	isSubmitting: boolean;
 }) {
 	const priorityOptions = [
 		{ value: "low", label: "Low" },
@@ -42,30 +46,43 @@ export function CreateTaskForm({
 
 	if (hasTasks && !isExpanded) {
 		return (
-			<button
-				type="button"
-				onClick={() => onExpandedChange(true)}
-				className="flex w-full items-center justify-between rounded-2xl border border-[#232f48] bg-[#1a2332]/95 p-4 text-left shadow-xl shadow-black/10 backdrop-blur transition hover:border-blue-500/30"
-			>
-				<span>
-					<span className="block text-base font-semibold text-white">
-						Add Task
+			<AnimatePresence mode="wait" initial={false}>
+				<motion.button
+					key="create-task-collapsed"
+					type="button"
+					onClick={() => onExpandedChange(true)}
+					initial={{ opacity: 0, y: -4 }}
+					animate={{ opacity: 1, y: 0 }}
+					exit={{ opacity: 0, y: -4 }}
+					transition={panelTransition}
+					className="flex w-full items-center justify-between overflow-hidden rounded-2xl border border-[#232f48] bg-[#1a2332]/95 p-4 text-left shadow-xl shadow-black/10 backdrop-blur transition hover:border-blue-500/30"
+				>
+					<span>
+						<span className="block text-base font-semibold text-white">
+							Add Task
+						</span>
+						<span className="mt-1 block text-sm text-[#92a4c9]">
+							Create another focused study task.
+						</span>
 					</span>
-					<span className="mt-1 block text-sm text-[#92a4c9]">
-						Create another focused study task.
+					<span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-[0_0_18px_rgba(19,91,236,0.28)]">
+						<Plus size={18} />
 					</span>
-				</span>
-				<span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-[0_0_18px_rgba(19,91,236,0.28)]">
-					<Plus size={18} />
-				</span>
-			</button>
+				</motion.button>
+			</AnimatePresence>
 		);
 	}
 
 	return (
-		<form
+		<AnimatePresence mode="wait" initial={false}>
+		<motion.form
+			key="create-task-expanded"
 			onSubmit={onSubmit}
-			className="rounded-2xl border border-[#232f48] bg-[#1a2332]/95 p-3 shadow-xl shadow-black/10 backdrop-blur sm:p-4"
+			initial={{ opacity: 0, y: -4 }}
+			animate={{ opacity: 1, y: 0 }}
+			exit={{ opacity: 0, y: -4 }}
+			transition={panelTransition}
+			className="overflow-hidden rounded-2xl border border-[#232f48] bg-[#1a2332]/95 p-3 shadow-xl shadow-black/10 backdrop-blur sm:p-4"
 		>
 			<div className="mb-3 flex items-start justify-between gap-3">
 				<div>
@@ -213,12 +230,18 @@ export function CreateTaskForm({
 				/>
 				<button
 					type="submit"
-					className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_0_18px_rgba(19,91,236,0.28)] transition hover:bg-blue-500"
+					disabled={isSubmitting}
+					className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_0_18px_rgba(19,91,236,0.28)] transition hover:bg-blue-500 disabled:cursor-wait disabled:opacity-70"
 				>
-					<Plus size={17} />
-					Add Task
+					{isSubmitting ? (
+						<span className="h-4 w-4 rounded-full border-2 border-white/35 border-t-white animate-spin" />
+					) : (
+						<Plus size={17} />
+					)}
+					{isSubmitting ? "Adding..." : "Add Task"}
 				</button>
 			</div>
-		</form>
+		</motion.form>
+		</AnimatePresence>
 	);
 }

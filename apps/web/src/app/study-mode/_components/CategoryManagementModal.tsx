@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Edit3, Plus, Trash2, X } from "lucide-react";
+import { Edit3, LoaderCircle, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import type { StudyCategory } from "./types";
@@ -23,6 +23,9 @@ export function CategoryManagementModal({
   onCreateCategory,
   onUpdateCategory,
   onRequestDeleteCategory,
+  isSaving,
+  isUpdating,
+  deletingCategoryId,
 }: {
   isOpen: boolean;
   categories: StudyCategory[];
@@ -30,6 +33,9 @@ export function CategoryManagementModal({
   onCreateCategory: (input: CategoryFormState) => Promise<void>;
   onUpdateCategory: (id: string, input: CategoryFormState) => Promise<void>;
   onRequestDeleteCategory: (category: StudyCategory) => void;
+  isSaving: boolean;
+  isUpdating: boolean;
+  deletingCategoryId: string | null;
 }) {
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [categoryForm, setCategoryForm] = useState<CategoryFormState>(emptyCategoryForm);
@@ -43,17 +49,23 @@ export function CategoryManagementModal({
 
   const submitCategory = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSaving) return;
+
     const name = categoryForm.name.trim();
     if (!name) return;
 
-    if (editingCategoryId) {
-      await onUpdateCategory(editingCategoryId, categoryForm);
-    } else {
-      await onCreateCategory(categoryForm);
-    }
+    try {
+      if (editingCategoryId) {
+        await onUpdateCategory(editingCategoryId, categoryForm);
+      } else {
+        await onCreateCategory(categoryForm);
+      }
 
-    setEditingCategoryId(null);
-    setCategoryForm(emptyCategoryForm);
+      setEditingCategoryId(null);
+      setCategoryForm(emptyCategoryForm);
+    } catch {
+      // Parent mutation handler shows the toast.
+    }
   };
 
   const startEdit = (category: StudyCategory) => {
@@ -72,7 +84,9 @@ export function CategoryManagementModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={onClose}
+          onClick={() => {
+            if (!isSaving) onClose();
+          }}
         >
           <motion.div
             initial={{ y: 18, scale: 0.97, opacity: 0 }}
@@ -91,7 +105,8 @@ export function CategoryManagementModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white"
+                disabled={isSaving}
+                className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white disabled:cursor-wait disabled:opacity-60"
                 aria-label="Close category modal"
               >
                 <X size={18} />
@@ -122,15 +137,26 @@ export function CategoryManagementModal({
                   />
                   <button
                     type="submit"
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-500"
+                    disabled={isSaving}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-wait disabled:opacity-70"
                   >
-                    <Plus size={16} />
-                    {editingCategoryId ? "Save" : "Add"}
+                    {isSaving ? (
+                      <LoaderCircle size={16} className="animate-spin" />
+                    ) : (
+                      <Plus size={16} />
+                    )}
+                    {isSaving ? "Saving..." : editingCategoryId ? "Save" : "Add"}
                   </button>
                 </div>
               </form>
 
               <div className="mt-5 space-y-3">
+                {isUpdating ? (
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-blue-200">
+                    <span className="h-3 w-3 rounded-full border border-blue-200/40 border-t-blue-100 animate-spin" />
+                    Updating...
+                  </div>
+                ) : null}
                 {categories.length ? (
                   categories.map((category) => (
                     <div
@@ -148,7 +174,8 @@ export function CategoryManagementModal({
                         <button
                           type="button"
                           onClick={() => startEdit(category)}
-                          className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-blue-500/10 hover:text-blue-300"
+                          disabled={isSaving || Boolean(deletingCategoryId)}
+                          className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-blue-500/10 hover:text-blue-300 disabled:cursor-wait disabled:opacity-50"
                           aria-label={`Edit ${category.name}`}
                         >
                           <Edit3 size={17} />
@@ -156,10 +183,15 @@ export function CategoryManagementModal({
                         <button
                           type="button"
                           onClick={() => onRequestDeleteCategory(category)}
-                          className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-red-500/10 hover:text-red-300"
+                          disabled={isSaving || Boolean(deletingCategoryId)}
+                          className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-red-500/10 hover:text-red-300 disabled:cursor-wait disabled:opacity-50"
                           aria-label={`Delete ${category.name}`}
                         >
-                          <Trash2 size={17} />
+                          {deletingCategoryId === category.id ? (
+                            <LoaderCircle size={17} className="animate-spin" />
+                          ) : (
+                            <Trash2 size={17} />
+                          )}
                         </button>
                       </div>
                     </div>

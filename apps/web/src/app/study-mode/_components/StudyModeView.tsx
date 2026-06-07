@@ -21,6 +21,7 @@ import { IdeaVaultModal } from "./IdeaVaultModal";
 import { PomodoroPanel } from "./PomodoroPanel";
 import { StudySidebar } from "./StudySidebar";
 import { TaskList } from "./TaskList";
+import type { TaskActionLoadingState } from "./TaskCard";
 import {
   ALARM_SETTINGS_KEY,
   POMODORO_KEY,
@@ -228,6 +229,11 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [ideaForm, setIdeaForm] = useState(emptyIdeaForm);
   const [editingIdeaId, setEditingIdeaId] = useState<string | null>(null);
+  const [taskActionLoading, setTaskActionLoading] = useState<TaskActionLoadingState>(null);
+  const [deletingCategoryId, setDeletingCategoryId] = useState<string | null>(null);
+  const [deletingIdeaId, setDeletingIdeaId] = useState<string | null>(null);
+  const [convertingIdeaId, setConvertingIdeaId] = useState<string | null>(null);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const pomodoroRef = useRef(pomodoro);
   const alarmSettingsRef = useRef(alarmSettings);
   const focusCompleteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -462,17 +468,20 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
   );
   const stats = useMemo<ProductivityStats>(
     () => ({
-      totalTasksToday: tasks.length,
+      totalTasksToday: activeTasks.length,
       completedTasks: completedTasks.length,
       totalFocusSessions: pomodoro.completedFocusSessions,
     }),
-    [completedTasks.length, pomodoro.completedFocusSessions, tasks.length],
+    [activeTasks.length, completedTasks.length, pomodoro.completedFocusSessions],
   );
   const timerProgress =
     1 - pomodoro.remainingSeconds / Math.max(pomodoro.plannedSeconds, 1);
   const longBreakDue =
     pomodoro.completedFocusSessions > 0 && pomodoro.completedFocusSessions % 4 === 0;
   const isLoadingData = tasksQuery.isPending || categoriesQuery.isPending || ideasQuery.isPending;
+  const isTasksUpdating = tasksQuery.isFetching && !tasksQuery.isPending;
+  const isCategoriesUpdating = categoriesQuery.isFetching && !categoriesQuery.isPending;
+  const isIdeasUpdating = ideasQuery.isFetching && !ideasQuery.isPending;
   const hasAuthError =
     isAuthError(tasksQuery.error) || isAuthError(categoriesQuery.error) || isAuthError(ideasQuery.error);
 
@@ -702,19 +711,25 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
 
   const handleTaskSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (createTaskMutation.isPending) return;
+
     const title = taskForm.title.trim();
     if (!title) return;
 
-    await createTaskMutation.mutateAsync({
-      categoryId: taskForm.categoryId || null,
-      title,
-      description: taskForm.description.trim() || null,
-      priority: taskForm.priority,
-      estimatedMinutes: parseEstimatedMinutes(taskForm.estimatedMinutes),
-      orderIndex: 0,
-    });
-    resetTaskForm();
-    setIsCreateTaskFormExpanded(false);
+    try {
+      await createTaskMutation.mutateAsync({
+        categoryId: taskForm.categoryId || null,
+        title,
+        description: taskForm.description.trim() || null,
+        priority: taskForm.priority,
+        estimatedMinutes: parseEstimatedMinutes(taskForm.estimatedMinutes),
+        orderIndex: 0,
+      });
+      resetTaskForm();
+      setIsCreateTaskFormExpanded(false);
+    } catch {
+      // onMutationError shows the toast.
+    }
   };
 
   const editTask = (task: StudyTask) => {
@@ -731,27 +746,38 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
 
   const saveEditedTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!editingTaskId) return;
+    if (!editingTaskId || updateTaskMutation.isPending) return;
 
     const title = editTaskForm.title.trim();
     if (!title) return;
 
-    await updateTaskMutation.mutateAsync({
-      id: editingTaskId,
-      categoryId: editTaskForm.categoryId || null,
-      title,
-      description: editTaskForm.description.trim() || null,
-      priority: editTaskForm.priority,
-      estimatedMinutes: parseEstimatedMinutes(editTaskForm.estimatedMinutes),
-    });
-    closeEditTaskModal();
+    try {
+      await updateTaskMutation.mutateAsync({
+        id: editingTaskId,
+        categoryId: editTaskForm.categoryId || null,
+        title,
+        description: editTaskForm.description.trim() || null,
+        priority: editTaskForm.priority,
+        estimatedMinutes: parseEstimatedMinutes(editTaskForm.estimatedMinutes),
+      });
+      closeEditTaskModal();
+    } catch {
+      // onMutationError shows the toast.
+    }
   };
 
   const deleteTask = async (taskId: string) => {
-    await deleteTaskMutation.mutateAsync({ id: taskId });
-    if (selectedTaskId === taskId) {
-      setSelectedTaskId(null);
-      setPomodoro((current) => createIdlePomodoro(current.mode, null, current.completedFocusSessions));
+    if (deleteTaskMutation.isPending) return;
+
+    setTaskActionLoading({ taskId, action: "delete" });
+    try {
+      await deleteTaskMutation.mutateAsync({ id: taskId });
+      if (selectedTaskId === taskId) {
+        setSelectedTaskId(null);
+        setPomodoro((current) => createIdlePomodoro(current.mode, null, current.completedFocusSessions));
+      }
+    } finally {
+      setTaskActionLoading(null);
     }
   };
 
@@ -761,16 +787,23 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
       message: `"${task.title}" will be removed from this study plan.`,
       confirmLabel: "Delete Task",
       onConfirm: () => {
-        void deleteTask(task.id);
+        return deleteTask(task.id);
       },
     });
   };
 
   const deleteIdea = async (ideaId: string) => {
-    await deleteIdeaMutation.mutateAsync({ id: ideaId });
-    if (editingIdeaId === ideaId) {
-      setEditingIdeaId(null);
-      setIdeaForm(emptyIdeaForm);
+    if (deleteIdeaMutation.isPending) return;
+
+    setDeletingIdeaId(ideaId);
+    try {
+      await deleteIdeaMutation.mutateAsync({ id: ideaId });
+      if (editingIdeaId === ideaId) {
+        setEditingIdeaId(null);
+        setIdeaForm(emptyIdeaForm);
+      }
+    } finally {
+      setDeletingIdeaId(null);
     }
   };
 
@@ -780,12 +813,14 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
       message: `"${idea.title}" will be removed from your Idea Vault.`,
       confirmLabel: "Delete Idea",
       onConfirm: () => {
-        void deleteIdea(idea.id);
+        return deleteIdea(idea.id);
       },
     });
   };
 
   const createCategory = async (input: { name: string; color: string }) => {
+    if (createCategoryMutation.isPending || updateCategoryMutation.isPending) return;
+
     const name = input.name.trim();
     if (!name) return;
 
@@ -797,6 +832,8 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
   };
 
   const updateCategory = async (id: string, input: { name: string; color: string }) => {
+    if (createCategoryMutation.isPending || updateCategoryMutation.isPending) return;
+
     const name = input.name.trim();
     if (!name) return;
 
@@ -808,7 +845,14 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
   };
 
   const deleteCategory = async (categoryId: string) => {
-    await deleteCategoryMutation.mutateAsync({ id: categoryId });
+    if (deleteCategoryMutation.isPending) return;
+
+    setDeletingCategoryId(categoryId);
+    try {
+      await deleteCategoryMutation.mutateAsync({ id: categoryId });
+    } finally {
+      setDeletingCategoryId(null);
+    }
   };
 
   const requestDeleteCategory = (category: StudyCategory) => {
@@ -817,28 +861,53 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
       message: `"${category.name}" will be removed. Tasks in this category will become uncategorized.`,
       confirmLabel: "Delete Category",
       onConfirm: () => {
-        void deleteCategory(category.id);
+        return deleteCategory(category.id);
       },
     });
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteConfirmation) return;
-    deleteConfirmation.onConfirm();
-    setDeleteConfirmation(null);
+    setIsConfirmingDelete(true);
+    try {
+      await deleteConfirmation.onConfirm();
+      setDeleteConfirmation(null);
+    } catch {
+      // onMutationError shows the toast.
+    } finally {
+      setIsConfirmingDelete(false);
+    }
   };
 
   const markTaskDone = async (taskId: string) => {
-    await markDoneMutation.mutateAsync({ id: taskId });
-    setPomodoro((current) =>
-      current.selectedTaskId === taskId
-        ? createIdlePomodoro(current.mode, taskId, current.completedFocusSessions)
-        : current,
-    );
+    if (markDoneMutation.isPending || taskActionLoading) return;
+
+    setTaskActionLoading({ taskId, action: "done" });
+    try {
+      await markDoneMutation.mutateAsync({ id: taskId });
+      setPomodoro((current) =>
+        current.selectedTaskId === taskId
+          ? createIdlePomodoro(current.mode, taskId, current.completedFocusSessions)
+          : current,
+      );
+    } catch {
+      // onMutationError shows the toast.
+    } finally {
+      setTaskActionLoading(null);
+    }
   };
 
   const restoreTask = async (taskId: string) => {
-    await restoreTaskMutation.mutateAsync({ id: taskId });
+    if (restoreTaskMutation.isPending || taskActionLoading) return;
+
+    setTaskActionLoading({ taskId, action: "restore" });
+    try {
+      await restoreTaskMutation.mutateAsync({ id: taskId });
+    } catch {
+      // onMutationError shows the toast.
+    } finally {
+      setTaskActionLoading(null);
+    }
   };
 
   const startTimer = () => {
@@ -897,29 +966,36 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
 
   const submitIdea = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (createIdeaMutation.isPending || updateIdeaMutation.isPending) return;
+
     const title = ideaForm.title.trim();
     if (!title) return;
 
-    if (editingIdeaId) {
-      await updateIdeaMutation.mutateAsync({
-        id: editingIdeaId,
-        title,
-        content: ideaForm.content.trim() || null,
-        tag: ideaForm.tag.trim() || null,
-      });
-      setEditingIdeaId(null);
-    } else {
-      await createIdeaMutation.mutateAsync({
-        title,
-        content: ideaForm.content.trim() || null,
-        tag: ideaForm.tag.trim() || null,
-      });
-    }
+    try {
+      if (editingIdeaId) {
+        await updateIdeaMutation.mutateAsync({
+          id: editingIdeaId,
+          title,
+          content: ideaForm.content.trim() || null,
+          tag: ideaForm.tag.trim() || null,
+        });
+        setEditingIdeaId(null);
+      } else {
+        await createIdeaMutation.mutateAsync({
+          title,
+          content: ideaForm.content.trim() || null,
+          tag: ideaForm.tag.trim() || null,
+        });
+      }
 
-    setIdeaForm(emptyIdeaForm);
+      setIdeaForm(emptyIdeaForm);
+    } catch {
+      // onMutationError shows the toast.
+    }
   };
 
   const editIdea = (idea: IdeaVaultItem) => {
+    if (createIdeaMutation.isPending || updateIdeaMutation.isPending) return;
     setEditingIdeaId(idea.id);
     setIdeaForm({
       title: idea.title,
@@ -929,13 +1005,22 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
   };
 
   const cancelEditIdea = () => {
+    if (createIdeaMutation.isPending || updateIdeaMutation.isPending) return;
     setEditingIdeaId(null);
     setIdeaForm(emptyIdeaForm);
   };
 
   const convertIdeaToTask = async (idea: IdeaVaultItem) => {
-    if (idea.convertedTaskId) return;
-    await convertIdeaMutation.mutateAsync({ id: idea.id });
+    if (idea.convertedTaskId || convertIdeaMutation.isPending) return;
+
+    setConvertingIdeaId(idea.id);
+    try {
+      await convertIdeaMutation.mutateAsync({ id: idea.id });
+    } catch {
+      // onMutationError shows the toast.
+    } finally {
+      setConvertingIdeaId(null);
+    }
   };
 
   const commonTaskListProps = {
@@ -949,6 +1034,8 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
     onRestoreTask: (taskId: string) => {
       void restoreTask(taskId);
     },
+    isUpdating: isTasksUpdating || isCategoriesUpdating,
+    loadingAction: taskActionLoading,
     categories,
   };
   const activeTaskSortControl = (
@@ -1043,6 +1130,7 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
             isExpanded={isCreateTaskFormExpanded}
             onExpandedChange={setIsCreateTaskFormExpanded}
             hasTasks={tasks.length > 0}
+            isSubmitting={createTaskMutation.isPending}
           />
           <TaskList
             title="Active Tasks"
@@ -1076,6 +1164,7 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
           onAlarmSettingsChange={setAlarmSettings}
           isCollapsed={isPomodoroPanelCollapsed}
           onCollapsedChange={setIsPomodoroPanelCollapsed}
+          isCompletingSession={completeFocusSessionMutation.isPending}
         />
       </div>
     );
@@ -1139,6 +1228,10 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
         onEditIdea={editIdea}
         onRequestDeleteIdea={requestDeleteIdea}
         onConvertIdea={convertIdeaToTask}
+        isSaving={createIdeaMutation.isPending || updateIdeaMutation.isPending}
+        isUpdating={isIdeasUpdating}
+        deletingIdeaId={deletingIdeaId}
+        convertingIdeaId={convertingIdeaId}
       />
       <EditTaskModal
         isOpen={Boolean(editingTaskId)}
@@ -1148,6 +1241,7 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
         onManageCategories={() => setIsCategoryModalOpen(true)}
         onClose={closeEditTaskModal}
         onSubmit={saveEditedTask}
+        isSaving={updateTaskMutation.isPending}
       />
       <CategoryManagementModal
         isOpen={isCategoryModalOpen}
@@ -1156,11 +1250,15 @@ export default function StudyModeView({ view = "today" }: { view?: StudyRoute })
         onCreateCategory={createCategory}
         onUpdateCategory={updateCategory}
         onRequestDeleteCategory={requestDeleteCategory}
+        isSaving={createCategoryMutation.isPending || updateCategoryMutation.isPending}
+        isUpdating={isCategoriesUpdating || isTasksUpdating}
+        deletingCategoryId={deletingCategoryId}
       />
       <ConfirmModal
         confirmation={deleteConfirmation}
         onCancel={() => setDeleteConfirmation(null)}
         onConfirm={confirmDelete}
+        isConfirming={isConfirmingDelete}
       />
     </div>
   );

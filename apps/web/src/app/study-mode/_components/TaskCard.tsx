@@ -6,9 +6,23 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@solstudy/ui/components/dropdown-menu";
-import { CheckCircle2, Clock3, Edit3, MoreHorizontal, RotateCcw, Trash2 } from "lucide-react";
+import { motion } from "framer-motion";
+import {
+  CheckCircle2,
+  Clock3,
+  Edit3,
+  LoaderCircle,
+  MoreHorizontal,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { priorityStyles, statusStyles } from "./storage";
 import type { StudyTask } from "./types";
+
+export type TaskActionLoadingState = {
+  taskId: string;
+  action: "delete" | "done" | "restore";
+} | null;
 
 export function TaskCard({
   task,
@@ -19,6 +33,7 @@ export function TaskCard({
   onDelete,
   onMarkDone,
   onRestore,
+  loadingAction,
 }: {
   task: StudyTask;
   category?: { name: string; color?: string | null };
@@ -28,12 +43,13 @@ export function TaskCard({
   onDelete: () => void;
   onMarkDone: () => void;
   onRestore: () => void;
+  loadingAction: TaskActionLoadingState;
 }) {
   const totalSpentMinutes = task.focusedMinutes + task.restMinutes;
   const estimatedMinutes = task.estimatedMinutes ?? null;
   const progress = Math.min(
     100,
-    estimatedMinutes ? Math.round((totalSpentMinutes / Math.max(estimatedMinutes, 1)) * 100) : 0,
+    estimatedMinutes ? Math.round((task.focusedMinutes / Math.max(estimatedMinutes, 1)) * 100) : 0,
   );
   const displayStatus = isSelected && task.status !== "done" ? "active" : task.status;
   const indicatorClass =
@@ -42,6 +58,9 @@ export function TaskCard({
       : isSelected
         ? "bg-gradient-to-br from-blue-300 to-emerald-300 shadow-[0_0_14px_rgba(19,91,236,0.5)]"
         : "border border-[#33415f] bg-[#1a2332]";
+  const activeLoadingAction =
+    loadingAction?.taskId === task.id ? loadingAction.action : null;
+  const isActionLoading = Boolean(activeLoadingAction);
 
   return (
     <article
@@ -87,6 +106,7 @@ export function TaskCard({
             render={
               <button
                 type="button"
+                disabled={isActionLoading}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#232f48] bg-[#1a2332] text-[#92a4c9] transition hover:border-blue-500/30 hover:text-white"
                 aria-label={`Open actions for ${task.title}`}
               />
@@ -97,12 +117,18 @@ export function TaskCard({
           <DropdownMenuContent
             align="end"
             positionerClassName="z-[80]"
-            className="w-44 rounded-xl border border-[#232f48] bg-[#111722] p-1 text-[#c5d3ef] shadow-xl"
+            className="w-44 rounded-xl border border-[#232f48] bg-[#111722] p-1 text-[#c5d3ef] shadow-xl duration-150"
           >
+            <motion.div
+              initial={{ opacity: 0, y: -3, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
+            >
             {task.status !== "done" ? (
               <>
                 <DropdownMenuItem
                   onClick={onEdit}
+                  disabled={isActionLoading}
                   className="cursor-pointer rounded-lg px-3 py-2 text-sm focus:bg-[#1a2332] focus:text-white"
                 >
                   <Edit3 size={15} />
@@ -110,37 +136,58 @@ export function TaskCard({
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={onDelete}
+                  disabled={isActionLoading}
                   className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-300 focus:bg-red-500/10 focus:text-red-200"
                 >
-                  <Trash2 size={15} />
-                  Delete
+                  {activeLoadingAction === "delete" ? (
+                    <LoaderCircle size={15} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={15} />
+                  )}
+                  {activeLoadingAction === "delete" ? "Deleting..." : "Delete"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={onMarkDone}
+                  disabled={isActionLoading}
                   className="cursor-pointer rounded-lg px-3 py-2 text-sm text-emerald-200 focus:bg-emerald-400/10 focus:text-emerald-100"
                 >
-                  <CheckCircle2 size={15} />
-                  Mark Done
+                  {activeLoadingAction === "done" ? (
+                    <LoaderCircle size={15} className="animate-spin" />
+                  ) : (
+                    <CheckCircle2 size={15} />
+                  )}
+                  {activeLoadingAction === "done" ? "Updating..." : "Mark Done"}
                 </DropdownMenuItem>
               </>
             ) : (
               <>
                 <DropdownMenuItem
                   onClick={onDelete}
+                  disabled={isActionLoading}
                   className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-300 focus:bg-red-500/10 focus:text-red-200"
                 >
-                  <Trash2 size={15} />
-                  Delete
+                  {activeLoadingAction === "delete" ? (
+                    <LoaderCircle size={15} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={15} />
+                  )}
+                  {activeLoadingAction === "delete" ? "Deleting..." : "Delete"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={onRestore}
+                  disabled={isActionLoading}
                   className="cursor-pointer rounded-lg px-3 py-2 text-sm text-blue-200 focus:bg-blue-500/10 focus:text-blue-100"
                 >
-                  <RotateCcw size={15} />
-                  Restore
+                  {activeLoadingAction === "restore" ? (
+                    <LoaderCircle size={15} className="animate-spin" />
+                  ) : (
+                    <RotateCcw size={15} />
+                  )}
+                  {activeLoadingAction === "restore" ? "Restoring..." : "Restore"}
                 </DropdownMenuItem>
               </>
             )}
+            </motion.div>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

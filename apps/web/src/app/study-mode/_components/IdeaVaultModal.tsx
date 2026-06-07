@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Edit3, Lightbulb, Plus, Trash2, X } from "lucide-react";
+import { Check, Edit3, Lightbulb, LoaderCircle, Plus, Trash2, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import type { IdeaFormState, IdeaVaultItem } from "./types";
@@ -18,6 +18,10 @@ export function IdeaVaultModal({
   onEditIdea,
   onRequestDeleteIdea,
   onConvertIdea,
+  isSaving,
+  isUpdating,
+  deletingIdeaId,
+  convertingIdeaId,
 }: {
   isOpen: boolean;
   ideas: IdeaVaultItem[];
@@ -31,6 +35,10 @@ export function IdeaVaultModal({
   onEditIdea: (idea: IdeaVaultItem) => void;
   onRequestDeleteIdea: (idea: IdeaVaultItem) => void;
   onConvertIdea: (idea: IdeaVaultItem) => void;
+  isSaving: boolean;
+  isUpdating: boolean;
+  deletingIdeaId: string | null;
+  convertingIdeaId: string | null;
 }) {
   return (
     <>
@@ -50,7 +58,9 @@ export function IdeaVaultModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
+            onClick={() => {
+              if (!isSaving) onClose();
+            }}
           >
             <motion.div
               initial={{ y: 20, scale: 0.96, opacity: 0 }}
@@ -69,7 +79,8 @@ export function IdeaVaultModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white"
+                  disabled={isSaving}
+                  className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-[#232f48] hover:text-white disabled:cursor-wait disabled:opacity-60"
                   aria-label="Close Idea Vault"
                 >
                   <X size={18} />
@@ -107,16 +118,22 @@ export function IdeaVaultModal({
                   />
                   <button
                     type="submit"
-                    className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+                    disabled={isSaving}
+                    className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-wait disabled:opacity-70"
                   >
-                    <Plus size={16} />
-                    {editingIdeaId ? "Save Idea" : "Add Idea"}
+                    {isSaving ? (
+                      <LoaderCircle size={16} className="animate-spin" />
+                    ) : (
+                      <Plus size={16} />
+                    )}
+                    {isSaving ? "Saving..." : editingIdeaId ? "Save Idea" : "Add Idea"}
                   </button>
                   {editingIdeaId ? (
                     <button
                       type="button"
                       onClick={onCancelEdit}
-                      className="ml-2 mt-3 inline-flex items-center justify-center rounded-xl border border-[#232f48] px-4 py-2.5 text-sm font-semibold text-[#92a4c9] transition hover:text-white"
+                      disabled={isSaving}
+                      className="ml-2 mt-3 inline-flex items-center justify-center rounded-xl border border-[#232f48] px-4 py-2.5 text-sm font-semibold text-[#92a4c9] transition hover:text-white disabled:cursor-wait disabled:opacity-60"
                     >
                       Cancel
                     </button>
@@ -124,6 +141,12 @@ export function IdeaVaultModal({
                 </form>
 
                 <div className="mt-5 space-y-3">
+                  {isUpdating ? (
+                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-blue-200">
+                      <span className="h-3 w-3 rounded-full border border-blue-200/40 border-t-blue-100 animate-spin" />
+                      Updating...
+                    </div>
+                  ) : null}
                   {ideas.length ? (
                     ideas.map((idea) => (
                       <div key={idea.id} className="rounded-2xl border border-[#232f48] bg-[#111722] p-4">
@@ -143,16 +166,21 @@ export function IdeaVaultModal({
                             <button
                               type="button"
                               onClick={() => onConvertIdea(idea)}
-                              disabled={Boolean(idea.convertedTaskId)}
+                              disabled={Boolean(idea.convertedTaskId) || isSaving || Boolean(deletingIdeaId) || Boolean(convertingIdeaId)}
                               className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-emerald-500/10 hover:text-emerald-300 disabled:cursor-default disabled:opacity-40"
                               aria-label={`Convert ${idea.title} to task`}
                             >
-                              <Check size={17} />
+                              {convertingIdeaId === idea.id ? (
+                                <LoaderCircle size={17} className="animate-spin" />
+                              ) : (
+                                <Check size={17} />
+                              )}
                             </button>
                             <button
                               type="button"
                               onClick={() => onEditIdea(idea)}
-                              className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-blue-500/10 hover:text-blue-300"
+                              disabled={isSaving || Boolean(deletingIdeaId) || Boolean(convertingIdeaId)}
+                              className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-blue-500/10 hover:text-blue-300 disabled:cursor-wait disabled:opacity-50"
                               aria-label={`Edit ${idea.title}`}
                             >
                               <Edit3 size={17} />
@@ -160,10 +188,15 @@ export function IdeaVaultModal({
                             <button
                               type="button"
                               onClick={() => onRequestDeleteIdea(idea)}
-                              className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-red-500/10 hover:text-red-300"
+                              disabled={isSaving || Boolean(deletingIdeaId) || Boolean(convertingIdeaId)}
+                              className="rounded-xl p-2 text-[#92a4c9] transition hover:bg-red-500/10 hover:text-red-300 disabled:cursor-wait disabled:opacity-50"
                               aria-label={`Delete ${idea.title}`}
                             >
-                              <Trash2 size={17} />
+                              {deletingIdeaId === idea.id ? (
+                                <LoaderCircle size={17} className="animate-spin" />
+                              ) : (
+                                <Trash2 size={17} />
+                              )}
                             </button>
                           </div>
                         </div>

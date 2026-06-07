@@ -77,5 +77,5 @@ export type DeleteConfirmationState = {
   title: string;
   message: string;
   confirmLabel: string;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
 } | null;
